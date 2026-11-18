@@ -5,9 +5,7 @@
 // pills in the top bar to the right of your Emberscales (styled like the game's own +X/s pill).
 // Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar in each
 // pill shrinks as the minute runs out, and changing your equipped gear restarts the minute.
-// It also shows the current world effects (weather, plus time of day) as pills at the start of the
-// time/weather chip, e.g. "×2 Luck", with debuffs tinted red, and countdowns to the next Blood Moon
-// and Cursed Tide. An "Auto-click" toggle in the top bar clicks the water for you, 1-15 times a second (− / +); it starts on.
+// An "Auto-click" toggle in the top bar clicks the water for you, 1-15 times a second (− / +); it starts on.
 // Stop it (and remove the pills) with:  stopGoldLogger()
 //
 // How it works: it samples counters the game only ever adds to:
@@ -26,9 +24,6 @@
 
 (async () => {
   const PERIOD_MS = 60_000;
-  // The world-effect pills fold in the time of day (Dawn, Dusk, Night) as well as the weather, the
-  // way the game applies them (multiplied together). Set to false for weather effects only.
-  const INCLUDE_TIME_OF_DAY = true;
 
   // window.game only exists for admins/localhost, so import the game's own modules instead.
   // ES modules are singletons per URL, so this returns the live instance the game is using.
@@ -36,8 +31,7 @@
   const S = await mod('/src/state.js');
   const { money, moneyRateHtml, fmtDec, fmtDecHtml, hex } = await mod('/src/format.js');
   const { CHEST_ICON, FISH_SHEET, cellStyle } = await mod('/src/art.js');
-  const { FISH, RARITIES, STATS, MUTATIONS } = await mod('/src/data.js');
-  const { worldAt, serverNow, getForcedWeather, clock: worldClock, DAY_LENGTH_MS, WEATHER_SLOT_MS, PHASES } = await mod('/src/world.js');
+  const { FISH, RARITIES } = await mod('/src/data.js');
 
   window.stopGoldLogger?.(); // replace any logger already running
 
@@ -233,172 +227,6 @@
     hiddenDuringWindow = document.visibilityState === 'hidden';
   };
 
-  // ---------- World effects (in the time/weather chip) ----------
-  // The game rebuilds #world's markup whenever the time or weather text changes (every in-game
-  // minute), which would drop anything inside it, so a MutationObserver puts the pills back first.
-  const fx = document.createElement('span');
-  fx.id = 'measured-world-fx';
-  fx.dataset.tip = 'measured-world-fx'; // an unknown tip key, so the game's own world tooltip stays out of the way
-  fx.style.cssText = 'display:inline-flex;align-items:center;gap:4px';
-  const fmtMult = (m) => `×${+m.toFixed(2)}`;
-  const worldEffects = (w) => {
-    const sources = INCLUDE_TIME_OF_DAY ? [w.phase, w.weather] : [w.weather];
-    const byStat = {};
-    for (const src of sources) {
-      for (const [stat, m] of Object.entries(src.mult ?? {})) {
-        const e = (byStat[stat] ??= { m: 1, from: [] });
-        e.m *= m;
-        e.from.push(`${src.name} ${fmtMult(m)}`);
-      }
-    }
-    const out = Object.entries(byStat)
-      .filter(([, e]) => e.m !== 1)
-      .map(([stat, e]) => ({ label: STATS[stat]?.name ?? stat, m: e.m, from: e.from, desc: STATS[stat]?.desc ?? '' }));
-    for (const [id, m] of Object.entries(w.weather.mutationBoost ?? {})) {
-      const name = MUTATIONS.find((x) => x.id === id)?.name ?? id;
-      out.push({ label: name, m, from: [`${w.weather.name} ${fmtMult(m)}`], desc: `${name} is ${m}× as likely when a fish mutates.` });
-    }
-    return out;
-  };
-  const fxPillStyle = (good) =>
-    'padding:0 6px;border-radius:999px;font-weight:600;white-space:nowrap;background:rgba(10,18,8,.6);' +
-    (good ? 'color:#c6f29a;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)' : 'color:#fca5a5;box-shadow:inset 0 0 0 1px rgba(248,113,113,.45)');
-  let fxKey = '';
-  const renderFx = () => {
-    const w = worldAt();
-    const key = `${INCLUDE_TIME_OF_DAY ? w.phase.id : ''}|${w.weather.id}`;
-    if (key === fxKey) return;
-    fxKey = key;
-    const effects = worldEffects(w);
-    for (const old of fx.children) tips.delete(old);
-    fx.replaceChildren(
-      ...effects.map((e) => {
-        const pill = document.createElement('span');
-        pill.style.cssText = fxPillStyle(e.m > 1);
-        pill.innerHTML = `${fmtMult(e.m)} <span style="opacity:.85">${e.label}</span>`;
-        tips.set(pill,
-          `<div class="tip-title">${fmtMult(e.m)} ${e.label}</div>` +
-          `<div>From ${e.from.join(' and ')}${e.from.length > 1 ? ' (multiplied)' : ''}</div>` +
-          (e.desc ? `<div class="tip-sep"></div><div class="muted">${e.desc}</div>` : ''));
-        attachTip(pill);
-        return pill;
-      }),
-    );
-    fx.style.display = effects.length ? 'inline-flex' : 'none';
-  };
-  // ---------- Countdowns to Blood Moon and Cursed Tide (in the same chip, after the effects) ----------
-  // The weather is a fixed function of the server clock (world.js hashes each 12-minute slot, and
-  // night-only weather shows only in the night part of its slot), so what's coming can be worked
-  // out exactly with the game's own worldAt(). The look-ahead walks stretches in which neither the
-  // weather slot nor the time of day changes and checks one moment in each. Weather that someone
-  // forces for everyone is included while it lasts; a future forced change can't be known.
-  const WATCH = [
-    { id: 'blood', name: 'Blood Moon', color: '#f87171', why: 'Best weather for opening chests: ×1.5 catch value, plus Night’s ×1.5 luck.' },
-    { id: 'cursed', name: 'Cursed Tide', color: '#a3e635', why: 'Second best for opening chests: ×3 luck, or ×4.5 together with Night’s ×1.5.' },
-  ];
-  const HORIZON_MS = 14 * 86_400_000;
-  // [startLocal, endLocal) stretches from `fromLocal`; the schedule runs on server time.
-  function* stretches(fromLocal) {
-    const off = serverNow() - worldClock.now();
-    const forcedUntil = getForcedWeather()?.until ?? 0; // server time
-    let t = fromLocal + off;
-    const end = t + HORIZON_MS;
-    while (t < end) {
-      const nextSlot = (Math.floor(t / WEATHER_SLOT_MS) + 1) * WEATHER_SLOT_MS;
-      const dayStart = t - (t % DAY_LENGTH_MS);
-      const nextPhase = PHASES.map((p) => dayStart + p.end * DAY_LENGTH_MS).find((b) => b > t);
-      const next = Math.min(nextSlot, nextPhase, forcedUntil > t ? forcedUntil : Infinity);
-      yield [t - off, next - off];
-      t = next;
-    }
-  }
-  // The next `count` runs of a weather: { start, end (local ms), night, forced }.
-  const upcoming = (id, count) => {
-    const out = [];
-    let cur = null;
-    for (const [a, b] of stretches(worldClock.now())) {
-      const w = worldAt((a + b) / 2);
-      if (w.weather.id === id) {
-        if (cur && cur.end === a) cur.end = b;
-        else cur = { start: a, end: b, night: w.phase.id === 'night', forced: w.forcedWeather };
-      } else if (cur) {
-        out.push(cur);
-        cur = null;
-        if (out.length >= count) break;
-      }
-    }
-    if (cur && out.length < count) out.push(cur);
-    return out;
-  };
-  const timers = document.createElement('span');
-  timers.id = 'measured-world-timers';
-  timers.dataset.tip = 'measured-world-timers'; // keeps the game's world tooltip out of the way, like the effects
-  timers.style.cssText = 'display:inline-flex;align-items:center;gap:4px';
-  const timerPills = WATCH.map((w) => {
-    const pill = document.createElement('span');
-    pill.style.cssText =
-      'display:inline-flex;align-items:center;gap:4px;padding:0 6px;border-radius:999px;font-weight:600;white-space:nowrap;' +
-      `background:rgba(10,18,8,.6);box-shadow:inset 0 0 0 1px ${w.color}99`;
-    attachTip(pill);
-    return pill;
-  });
-  timers.append(...timerPills);
-  const fmtWhen = (t) => new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  const fmtClock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  let schedule = {};
-  let scheduleAt = -Infinity;
-  const renderTimers = () => {
-    const now = worldClock.now();
-    // Work the schedule out again every 30 s (forced weather may have started) or once a run is over
-    if (now - scheduleAt > 30_000 || WATCH.some((w) => schedule[w.id]?.[0]?.end <= now)) {
-      for (const w of WATCH) schedule[w.id] = upcoming(w.id, 3);
-      scheduleAt = now;
-    }
-    WATCH.forEach((w, i) => {
-      const pill = timerPills[i];
-      const runs = schedule[w.id];
-      const icon = `<img src="/assets/icons/hud/${w.id}.svg" alt="" style="width:14px;height:14px">`;
-      const next = runs[0];
-      if (!next) {
-        pill.innerHTML = `${icon}<span class="muted">none in 14 days</span>`;
-        setTip(pill, `<div class="tip-title">${w.name}</div><div class="muted">Not in the next 14 days.</div>`);
-        return;
-      }
-      const active = next.start <= now;
-      pill.style.background = active ? `${w.color}40` : 'rgba(10,18,8,.6)';
-      pill.style.color = active ? w.color : '';
-      pill.innerHTML = active ? `${icon}now · ${fmtDuration((next.end - now) / 1000)} left` : `${icon}in ${fmtDuration((next.start - now) / 1000)}`;
-      const night = (r) => (w.id === 'cursed' ? (r.night ? ' · <b>at night</b>' : ' · daytime') : '');
-      // (An active run's start is just "now", so it shows when it ends rather than how long it lasts.)
-      const rows = runs
-        .map((r, k) => {
-          const when = k === 0 && active
-            ? `<b>Now</b>, until ${fmtClock(r.end)}`
-            : `${fmtWhen(r.start)} – ${fmtClock(r.end)} <span class="muted">(${Math.round((r.end - r.start) / 60_000)} min)</span>`;
-          return `<div>${when}${night(r)}${r.forced ? ' <span class="muted">(forced)</span>' : ''}</div>`;
-        })
-        .join('');
-      setTip(pill,
-        `<div class="tip-title" style="color:${w.color}">${w.name}</div><div class="muted">${w.why}</div>` +
-        `<div class="tip-sep"></div><div class="tip-head">Coming up</div>${rows}` +
-        `<div class="tip-sep"></div><div class="muted">From the game's fixed weather schedule. Weather someone forces for everyone can override it.</div>`);
-    });
-  };
-
-  const placeFx = () => {
-    const world = document.getElementById('world');
-    if (!world) return;
-    if (world.firstChild !== fx) world.prepend(fx);
-    if (fx.nextSibling !== timers) fx.after(timers);
-  };
-  const worldEl = document.getElementById('world');
-  const fxObserver = new MutationObserver(placeFx);
-  if (worldEl) fxObserver.observe(worldEl, { childList: true });
-  renderFx();
-  renderTimers();
-  placeFx();
-  const fxTimer = setInterval(() => { renderFx(); renderTimers(); placeFx(); }, 1000);
-
   // ---------- Auto-clicker ----------
   // The game allows auto-clicking: clicks over 15 a second simply don't count, on this side and on
   // the server, and nobody is flagged (clicks.js; changelog "No more auto-clicker detection").
@@ -593,13 +421,9 @@
   window.stopGoldLogger = () => {
     clearInterval(id);
     clearInterval(gearTimer);
-    clearInterval(fxTimer);
     clearInterval(autoTipTimer);
     beat?.stop();
     autoWrap.remove();
-    fxObserver.disconnect();
-    fx.remove();
-    timers.remove();
     document.removeEventListener('visibilitychange', onVis);
     wrap.remove();
     tip.remove();
