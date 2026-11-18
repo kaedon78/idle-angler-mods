@@ -1,0 +1,4 @@
+# The test player is its own repo
+test-player/
+# Personal Claude Code permissions
+.claude/settings.local.json
