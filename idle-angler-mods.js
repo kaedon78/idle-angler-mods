@@ -2282,9 +2282,13 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel .qs-chests .row-main{flex:1}
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
 #summary-tab{position:fixed;top:calc(50% - 70px);right:0;z-index:5;transform:translateY(-100%);display:flex;flex-direction:column;align-items:center;gap:6px;
-  min-width:0;padding:10px 4px;writing-mode:vertical-rl;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out}
+  min-width:0;padding:10px 0;writing-mode:vertical-rl;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out;
+  /* As wide as the game's side tabs to the next water (.sail-tab: 44px, zoomed by the text size) */
+  width:calc(44px * var(--ui-scale, 1));justify-content:center}
 body.qs-open #summary-tab{right:var(--qs-w)}
-#summary-tab .qs-arrow{writing-mode:horizontal-tb;font-size:12px}
+/* The side tabs' chevron (.sail-chev): it points right as drawn, so it's flipped to point left while the panel is away */
+#summary-tab .qs-arrow{flex:none;width:10px;height:18px;background:var(--accent);-webkit-mask:url('/assets/icons/hud/chevron.svg') center / contain no-repeat;mask:url('/assets/icons/hud/chevron.svg') center / contain no-repeat;transform:scaleX(-1)}
+body.qs-open #summary-tab .qs-arrow{transform:none}
 #summary-tab .qs-dot{writing-mode:horizontal-tb;min-width:16px;padding:0 3px;font:700 11px/16px var(--font);text-align:center;color:#1b2a17;background:var(--accent);border-radius:8px}
 #summary-tab .qs-dot:empty{display:none}
 /* The basement: the Altar's black and crimson, as the game draws the Draconic Altar window */
@@ -2323,9 +2327,8 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   tab.id = 'summary-tab';
   tab.className = 'btn';
   tab.setAttribute('aria-controls', 'summary-panel');
-  tab.innerHTML = '<span class="qs-arrow">◀</span><span>Quicklinks</span><span class="qs-dot" title="Bounties to claim"></span>';
+  tab.innerHTML = '<span class="qs-arrow" aria-hidden="true"></span><span>Quicklinks</span><span class="qs-dot" title="Bounties to claim"></span>';
   document.body.append(tab);
-  const arrow = tab.querySelector('.qs-arrow');
   const dot = tab.querySelector('.qs-dot');
 
   // ---------- Keeping it current ----------
@@ -2409,9 +2412,8 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     isOpen = open;
     document.body.classList.toggle('qs-open', open);
     tab.setAttribute('aria-expanded', String(open));
-    tab.setAttribute('aria-label', open ? 'Hide the summary' : 'Show the summary');
-    tab.title = open ? 'Hide the summary' : 'Show the summary: bounties, ascending, Foreman, chests and gear upgrades';
-    arrow.textContent = open ? '▶' : '◀';
+    tab.setAttribute('aria-label', open ? 'Hide Quicklinks' : 'Show Quicklinks');
+    tab.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: gear sets, bounties, ascending, Foreman, chests and gear upgrades';
     panel.inert = !open;
     if (remember) {
       try {
