@@ -14,12 +14,12 @@
 // is running. It starts every mod you've left on, and adds a Mods tab to the game's Settings window
 // (Esc) where each one can be turned on or off. That takes effect at once and is remembered in this
 // browser for the next time the script runs. The mods:
-//  - Top bar layout fixes: the game's own top bar stays put (test report #28 and #29)
+//  - Top bar layout fixes (always on): the game's own top bar stays put (test report #28 and #29)
 //  - Zone map strip: every place in the world under the top bar; click one to go there
 //  - Income pills and auto-click: measured gold, fish, chests and XP a second; Auto-click 1-15/s
 //  - Build switcher: put on a saved gear set from the bottom bar, or press 1-5
 //  - Weather forecast: click the time and weather in the top bar, or press W
-//  - Summary panel: a tab on the right edge with what most needs you right now
+//  - Quicklinks: a tab on the right edge with what most needs you right now
 // Pasting it again replaces the one running. Stop everything (and remove the Mods tab) with:
 //   stopIdleAnglerMods()
 // Each mod below is the script it used to be, unchanged; the manager at the bottom runs them.
@@ -37,7 +37,7 @@ window.stopIdleAnglerMods?.(); // replace the mods already running
 //    ("9g 87s" to "10g", "9,999g 99s" to "10.00Kg") the rest of the bar shifts. Each one keeps the
 //    widest it has been as its min-width, so it can grow but never shrinks back and moves nothing. A new
 //    text size starts them over.
-// Stop it with:  stopTopbarFixes(), or untick it in Settings > Mods
+// Always on (not listed in Settings > Mods). Stop it from the console with:  stopTopbarFixes()
 // =====================================================================================================
 const topbarFixes = async () => {
   window.stopTopbarFixes?.(); // replace one already running
@@ -1625,7 +1625,12 @@ const weatherForecast = async () => {
 #wf-win .wf-now .wf-clock{font:600 15px var(--num);text-shadow:1px 1px 0 #000}
 #wf-win .wf-now .wf-side{grid-row:span 2;display:grid;gap:3px;justify-items:end;text-align:right;font-size:12px}
 #wf-win .wf-now .wf-desc{grid-column:2;font-size:12px}
-#wf-win .wf-tabs{position:sticky;top:-10px;z-index:3;margin:0 -8px 8px;padding:0 8px;background:#223020}
+/* The tab row is the game's own (.win-tabs.panel-tabs, first in the body: the close button sits at its right end).
+   Its sides are pulled out by the body's 6px padding, not the 8px of .panel-tabs' margin, which ran 2px past
+   the body and gave it a sideways scrollbar */
+#wf-win .wf-tabs{margin-left:-6px;margin-right:-6px}
+#wf-win .win-body{overflow-x:hidden}
+#wf-win .wf-nowbox,#wf-win .wf-view{max-width:100%;box-sizing:border-box}
 #wf-win .wf-tabs .win-tab kbd{display:none}
 #wf-win .wf-head{display:flex;align-items:baseline;gap:8px;padding:8px 6px 4px;font-weight:700;color:var(--accent);border-bottom:1px solid #3a4a30}
 #wf-win .wf-head:first-child{padding-top:0}
@@ -1676,8 +1681,8 @@ const weatherForecast = async () => {
       <button class="win-close" aria-label="Close Forecast">✕</button>
     </header>
     <div class="win-body">
+      <div class="win-tabs panel-tabs wf-tabs"></div>
       <div class="wf-nowbox"></div>
-      <div class="win-tabs wf-tabs"></div>
       <div class="wf-view"></div>
     </div>
     <div class="win-resize" title="Drag to resize · double-click for the normal size"></div>`;
@@ -1742,6 +1747,23 @@ const weatherForecast = async () => {
 
   win.addEventListener('pointerdown', focus);
   win.querySelector('.win-close').addEventListener('click', close);
+  // The close button keeps clear of the scrollbar through --sbw, as the game's windows.js sets it on its own
+  // windows (trackScrollbar): the scrollbar's width while the body scrolls, 0 while it doesn't
+  let sbwQueued = false;
+  const syncSbw = () => {
+    sbwQueued = false;
+    const zoom = body.offsetWidth ? body.getBoundingClientRect().width / body.offsetWidth : 1;
+    win.style.setProperty('--sbw', `${Math.max(0, Math.round((body.offsetWidth - body.clientWidth) * zoom))}px`);
+  };
+  const queueSbw = () => {
+    if (sbwQueued) return;
+    sbwQueued = true;
+    requestAnimationFrame(syncSbw);
+  };
+  const sbwResize = new ResizeObserver(queueSbw);
+  sbwResize.observe(body);
+  const sbwChange = new MutationObserver(queueSbw);
+  sbwChange.observe(body, { childList: true, subtree: true });
   // Clicking any of the game's windows takes the focus glow away from this one
   const onRootDown = (e) => {
     if (!win.contains(e.target) && e.target.closest?.('.window')) win.classList.remove('focused');
@@ -1986,6 +2008,8 @@ const weatherForecast = async () => {
   window.stopWeatherForecast = () => {
     clearInterval(timer);
     observer.disconnect();
+    sbwResize.disconnect();
+    sbwChange.disconnect();
     window.removeEventListener('keydown', onKey, true);
     removeEventListener('resize', onResize);
     root.removeEventListener('pointerdown', onRootDown);
@@ -2000,7 +2024,7 @@ const weatherForecast = async () => {
 };
 
 // =====================================================================================================
-// Summary panel (was summary-panel.js)
+// Quicklinks (was summary-panel.js, the Summary panel)
 //
 // It adds a tab on the right edge of the page; click it to slide out a panel with what most needs you
 // right now. While the panel is out, the game shrinks to make room beside it (nothing is covered);
@@ -2258,7 +2282,7 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel .qs-chests{display:flex;align-items:center;gap:8px}
 #summary-panel .qs-chests .row-main{flex:1}
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
-#summary-tab{position:fixed;top:50%;right:0;z-index:5;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;
+#summary-tab{position:fixed;top:calc(50% - 70px);right:0;z-index:5;transform:translateY(-100%);display:flex;flex-direction:column;align-items:center;gap:6px;
   min-width:0;padding:10px 4px;writing-mode:vertical-rl;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out}
 body.qs-open #summary-tab{right:var(--qs-w)}
 #summary-tab .qs-arrow{writing-mode:horizontal-tb;font-size:12px}
@@ -2285,7 +2309,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   ];
   const panel = document.createElement('aside');
   panel.id = 'summary-panel';
-  panel.setAttribute('aria-label', 'Summary');
+  panel.setAttribute('aria-label', 'Quicklinks');
   panel.innerHTML = `<div class="qs-body">${SECTIONS.map(
     (s) => `<section data-qs="${s.id}"><h3>${esc(s.title)} <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
   ).join('')}</div>`;
@@ -2300,7 +2324,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   tab.id = 'summary-tab';
   tab.className = 'btn';
   tab.setAttribute('aria-controls', 'summary-panel');
-  tab.innerHTML = '<span class="qs-arrow">◀</span><span>Summary</span><span class="qs-dot" title="Bounties to claim"></span>';
+  tab.innerHTML = '<span class="qs-arrow">◀</span><span>Quicklinks</span><span class="qs-dot" title="Bounties to claim"></span>';
   document.body.append(tab);
   const arrow = tab.querySelector('.qs-arrow');
   const dot = tab.querySelector('.qs-dot');
@@ -2425,7 +2449,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     dispatchEvent(new Event('resize'));
     delete window.stopSummaryPanel;
   };
-  console.log('[summary] On: the Summary tab is on the right edge. Turn it off with stopSummaryPanel()');
+  console.log('[quicklinks] On: the Quicklinks tab is on the right edge. Turn it off with stopSummaryPanel()');
 };
 
 // =====================================================================================================
@@ -2442,6 +2466,7 @@ const MODS = [
     desc: "Until the game fixes test report #28 and #29: the Supporter store button stays beside the rest of the top bar, and the currencies keep their widest width so the bar doesn't shift as your gold changes",
     start: topbarFixes,
     stop: 'stopTopbarFixes',
+    always: true, // a fix, not a feature: always on, and not listed in the Mods tab
   },
   {
     id: 'zoneMap',
@@ -2483,7 +2508,7 @@ const MODS = [
   },
   {
     id: 'summaryPanel',
-    name: "Summary panel",
+    name: "Quicklinks",
     desc: "A tab on the right edge that slides out your gear sets, bounties, ascending, the Foreman, chests and the upgrades in your bag",
     start: summaryPanel,
     stop: 'stopSummaryPanel',
@@ -2505,7 +2530,7 @@ const saveChoices = () => {
     // storage blocked: the choice lasts until the page reloads
   }
 };
-const wanted = (m) => choices[m.id] !== false;
+const wanted = (m) => m.always || choices[m.id] !== false;
 const starting = new Set();
 const failed = {}; // mod id -> why it didn't start
 // A mod is running while its stop function exists (also true of one stopped from the console)
@@ -2591,7 +2616,7 @@ function paneHtml() {
       <button class="btn small" data-im-all="on">All on</button>
       <button class="btn small" data-im-all="off">All off</button>
     </div>
-    ${MODS.map(row).join('')}`;
+    ${MODS.filter((m) => !m.always).map(row).join('')}`;
 }
 
 const settingsWindow = () => layer.querySelector('section.window[data-win="settings"]');
@@ -2679,7 +2704,7 @@ function onClick(e) {
   const all = e.target.closest('[data-im-all]');
   if (all) {
     const on = all.dataset.imAll === 'on';
-    for (const m of MODS) {
+    for (const m of MODS.filter((x) => !x.always)) {
       choices[m.id] = on;
       if (on && !running(m)) turnOn(m);
       else if (!on && running(m)) turnOff(m);
