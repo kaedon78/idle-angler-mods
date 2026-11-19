@@ -20,20 +20,23 @@ window.stopIdleAnglerMods?.(); // replace the mods already running
 // Zone map strip (was zone-map.js)
 //
 // It adds a thin strip across the screen under the top bar, laid out like the game's world, left to
-// right: the Town, the Farm and the Cabin, then every water from the Pond to the Cosmic Void, each cell
-// showing a small copy of that place's scenery.
+// right: the Basement and the Cabin, then every water from the Pond to the Cosmic Void, each cell
+// showing a small copy of that place's scenery. (The Town and the Farm are left out while the game
+// has them shelved.)
 //  - where you are is highlighted, with a marker for your boat's position in the water you're on
 //  - each water shows your species mastery there (★ steps reached out of 3 per species: catching a
-//    species 10, 100 and 1,000 times), the Farm shows crops ready to harvest
+//    species 10, 100 and 1,000 times); the Basement shows your Emberscale Shards, or, while its door
+//    is still shut, how many ascensions it needs
 //  - a ✦ on a water when a fish that only bites in the current weather or time of day is biting
 //    there right now and you haven't caught it yet
 //  - what a locked water needs: the boat's price (gold when you can afford it), Power or ascensions
 // Hover a cell for details: every species in a water with its Power stars and its species mastery
 // level (Lv 1-99, as in the Collection).
 // Click a cell to go there: a water sails there (the game's own travel action, as Boat & Map's "Sail
-// here"); the Town, Farm and Cabin walk you in with the game's own fade, from wherever you are
+// here"); the Basement and the Cabin walk you in with the game's own fade, from wherever you are
 // (sailing back to the Pond first if needed). A locked water opens Boat & Map instead, so buying a
-// boat stays the game's own button.
+// boat stays the game's own button. A shut Basement does nothing until you have the ascensions;
+// then it walks you into the Cabin, which is what opens its door.
 // Stop it (and remove the strip) with:  stopZoneMap(), or untick it in Settings > Mods
 // =====================================================================================================
 const zoneMap = async () => {
@@ -42,14 +45,14 @@ const zoneMap = async () => {
   const { act } = await mod('/src/actions.js');
   const { ZONES, BOATS, RARITIES, FISH, SEA, POWER } = await mod('/src/data.js');
   const { money, fmtDec, hex } = await mod('/src/format.js');
-  const { worldAt, conditionName, serverNow } = await mod('/src/world.js');
+  const { worldAt, conditionName } = await mod('/src/world.js');
   const { FishingScene } = await mod('/src/scene.js');
   const { Homestead } = await mod('/src/homestead.js');
   const { openWindow } = await mod('/src/ui.js');
   const { describeBounty, bountyProgress } = await mod('/src/bounties.js');
   // Species mastery levels (1-99). A newer module, so the strip still works without it (no "Lv" then)
   const { masteryLevel } = await mod('/src/mastery.js').catch(() => ({}));
-  const { MASTERY } = await mod('/src/data.js');
+  const { MASTERY, DRACONIC } = await mod('/src/data.js');
   const MAX_LV = MASTERY?.maxLevel ?? 99;
 
   window.stopZoneMap?.(); // replace a strip already running
@@ -85,7 +88,7 @@ const zoneMap = async () => {
     try { scene.onWalkIn(); } finally { Homestead.prototype.enter = enter; }
     return home;
   };
-  const placeNow = () => scene?.place ?? 'dock'; // 'dock', 'cabin', 'garden' or 'village'
+  const placeNow = () => scene?.place ?? 'dock'; // 'dock', 'cabin' or 'basement' ('garden', 'village': shelved)
 
   // ---------- Tooltip ----------
   // A lookalike of the game's (which only renders its own data-tip keys): same frame and tip classes.
@@ -155,12 +158,14 @@ const zoneMap = async () => {
     if (root.style.getPropertyValue('--zm-h') !== h) root.style.setProperty('--zm-h', h);
   };
 
-  // Land first (the Town is furthest left, as in the game), then the waters
+  // Land first, then the waters. The Basement is left of the Cabin, behind its left door, as in the game.
+  // The Town and the Farm aren't listed: the game has shelved them (data.js SHELVED), so no door leads there.
   const LAND = [
-    { place: 'village', name: 'Town', short: 'T', sky: '#9a7b55', water: '#4f3b26' },
-    { place: 'garden', name: 'Farm', short: 'F', sky: '#7fb35a', water: '#3e5a26' },
+    { place: 'basement', name: 'Basement', short: 'B', sky: '#3a1f2a', water: '#1a0f0c' },
     { place: 'cabin', name: 'Cabin', short: 'C', sky: '#b58654', water: '#5c3b20' },
   ];
+  const DRACONIC_AT = DRACONIC?.requirement ?? 50; // ascensions that open the basement door
+  const basementOpen = () => Boolean(S.state.draconic?.basement);
   const LAND_ORDER = LAND.map((l) => l.place);
   const makeCell = (n, sky, water, onClick) => {
     const el = document.createElement('div');
@@ -279,44 +284,47 @@ const zoneMap = async () => {
       if (layer.poke) band(g, pic, y, { bottom: WATER }); // what breaks the surface, solid
     }
   };
-  // The homestead: the Town's forest and buildings (village.js), the Farm's view of the Pond's hills
-  // (homestead.js), the Cabin's plank wall, beams and furniture (its "Quiet Cabin" sheets)
+  // The homestead: the Basement's cellar round the Altar's crystal (homestead.js drawBasement), the Cabin's
+  // plank wall, beams and furniture (its "Quiet Cabin" sheets)
   const DAY_SKY = 0x8fc6ee;
   const GROUND = 540;
   const sprite = (g, pic, x, bottom, [sx, sy, sw, sh] = [0, 0, pic.width, pic.height]) =>
     g.drawImage(pic, sx, sy, sw, sh, x, bottom - sh * PX, sw * PX, sh * PX);
   const paintLand = {
-    async village(g) {
-      skyFill(g, DAY_SKY, GROUND);
-      for (const n of [4, 3, 2, 1]) {
-        const pic = await img(`/assets/village/forest-${n}.png`);
-        if (pic) band(g, pic, GROUND - 240 * PX, { bottom: GROUND });
+    async basement(g) {
+      const ceiling = GROUND - 150 * PX;
+      const footing = GROUND - 22 * PX;
+      // Overhead, the cabin's floorboards seen from below; damp planks, a fieldstone footing, a dirt floor
+      for (let y = 0, i = 0; y < ceiling; y += 4 * PX, i++) { g.fillStyle = rgb(i % 2 ? 0x241510 : 0x2b1a12); g.fillRect(0, y, VW, 4 * PX); }
+      const wall = await img('/assets/cabin/qc-wall.png');
+      if (wall) band(g, recolor(crop(wall, 16, 16, 96, 96), 0x6e5a54, 'multiply'), ceiling, { repeat: 'repeat', rows: (footing - ceiling) / PX });
+      else { g.fillStyle = rgb(0x2a1c18); g.fillRect(0, ceiling, VW, footing - ceiling); }
+      g.fillStyle = rgb(0x1c1916);
+      g.fillRect(0, footing, VW, GROUND - footing);
+      for (let row = 0; row < 3; row++) {
+        for (let x = -row * 9 * PX, i = 0; x < VW; i++) {
+          const w = (8 + ((row * 7 + i * 5) % 10)) * PX;
+          g.fillStyle = rgb([0x4a443e, 0x554d45, 0x3e3934, 0x504840][(row + i) % 4]);
+          g.fillRect(x + PX, footing + row * 7 * PX + PX, w - PX, 6 * PX);
+          x += w;
+        }
       }
-      g.fillStyle = rgb(0x2f3a24);
-      g.fillRect(0, GROUND - 2 * PX, VW, 2 * PX); // the forest floor's edge
-      g.fillStyle = rgb(0x6f675d);
-      g.fillRect(0, GROUND, VW, VH - GROUND); // the street
-      g.fillStyle = rgb(0x5a534b);
-      for (let x = 0; x < VW; x += 12 * PX) g.fillRect(x, GROUND + 6 * PX, PX, 4 * PX);
-      for (const [name, x] of [['smithy', 240], ['harbour', 760], ['shack', 1320]]) {
-        const pic = await img(`/assets/village/${name}.png`);
-        if (pic) sprite(g, pic, x, GROUND + 4 * PX);
-      }
-    },
-    async garden(g) {
-      skyFill(g, DAY_SKY, GROUND);
-      for (const layer of BACKDROPS?.pond?.above ?? []) {
-        const pic = await img(layer.src);
-        if (pic) band(g, pic, GROUND - (layer.base + 1) * PX, { bottom: GROUND });
-      }
-      g.fillStyle = rgb(0x5f9a4a);
+      g.fillStyle = rgb(0x2a1f17);
       g.fillRect(0, GROUND, VW, VH - GROUND);
-      for (let x = 300; x < VW - 200; x += 180) { // the plots
-        g.fillStyle = rgb(0x5a3a22);
-        g.fillRect(x, GROUND + 10 * PX, 140, 14 * PX);
-        g.fillStyle = rgb(0x86c35a);
-        for (let i = 0; i < 4; i++) g.fillRect(x + 14 + i * 32, GROUND + 6 * PX, 4 * PX, 6 * PX);
-      }
+      // The Altar's crystal in the middle, the only light: everything else fades into the dark
+      const cx = VW / 2, cy = GROUND - 30 * PX;
+      const crystal = await img('/assets/cabin/crystal-dark.png');
+      if (crystal) sprite(g, crystal, cx - 16 * PX, GROUND, [0, 0, 32, 32]); // the first frame of its glint
+      const dark = g.createRadialGradient(cx, cy, 30 * PX, cx, cy, 420 * PX);
+      dark.addColorStop(0, 'rgba(8,4,10,0)');
+      dark.addColorStop(1, 'rgba(8,4,10,.85)');
+      g.fillStyle = dark;
+      g.fillRect(0, 0, VW, VH);
+      const glow = g.createRadialGradient(cx, cy, 0, cx, cy, 90 * PX);
+      glow.addColorStop(0, 'rgba(217,70,239,.45)');
+      glow.addColorStop(1, 'rgba(124,58,237,0)');
+      g.fillStyle = glow;
+      g.fillRect(0, 0, VW, VH);
     },
     async cabin(g) {
       const ceiling = GROUND - 140 * PX;
@@ -381,11 +389,6 @@ const zoneMap = async () => {
     const f = Math.min(1, Math.max(0, S.boatX() / SEA.length));
     return `calc(6px + (100% - 12px) * ${f.toFixed(3)})`;
   };
-  const clock = (ms) => {
-    const s = Math.max(0, Math.ceil(ms / 1000));
-    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-    return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(s % 60).padStart(2, '0')}s`;
-  };
 
   const renderLand = (where) => {
     const tipEnd = (l) => `<div class="tip-sep"></div><div class="muted">${where === l.place ? "You're here." : `Click to go to the ${l.name}.`}</div>`;
@@ -394,26 +397,33 @@ const zoneMap = async () => {
       el.classList.toggle('here', where === l.place);
       let sub = '';
       let body = '';
+      let end = tipEnd(l);
       if (l.place === 'cabin') {
         body = '<div>Your home by the Pond. Fishing carries on, idle, while you\'re here.</div>';
-      } else if (l.place === 'garden') {
-        const plots = S.state.farm?.plots ?? [];
-        const now = serverNow();
-        const growing = plots.filter((p) => p.crop && p.readyAt > now);
-        const ready = plots.filter((p) => p.crop && p.readyAt <= now).length;
-        const empty = plots.length - growing.length - ready;
-        if (ready) sub = `<span class="sub pill" style="color:#86efac">${ready} ready</span>`;
-        const next = growing.length ? Math.min(...growing.map((p) => p.readyAt)) - now : null;
-        body =
-          `<div>${plots.length} plots: <b style="color:#86efac">${ready} ready</b> · ${growing.length} growing · ${empty} empty</div>` +
-          (next !== null ? `<div class="muted">Next crop ready in ${clock(next)}</div>` : '');
       } else {
-        body =
-          '<div>Harbourmaster <span class="muted">· Boat &amp; Map</span></div><div>Blacksmith <span class="muted">· reforging</span></div>' +
-          '<div>Fishmonger <span class="muted">· Market</span></div><div>Notice board <span class="muted">· Bounties</span></div>';
+        // The basement: shut until the door opens for good, the first time you walk into the cabin with
+        // DRACONIC_AT ascensions (main.js basementRumble)
+        const asc = S.state.ascension.count;
+        const open = basementOpen();
+        el.classList.toggle('locked', !open);
+        const shards = S.state.draconic?.shards ?? 0;
+        if (open) {
+          if (shards) sub = `<span class="sub pill"><span style="color:#f0abfc">◆</span>${fmtDec(shards)}</span>`;
+          body =
+            "<div>The Draconic Altar <span class=\"muted\">· Draconic ascension and Emberscale Shard upgrades</span></div>" +
+            `<div>${fmtDec(shards)} Emberscale Shard${shards === 1 ? '' : 's'} · ${fmtDec(S.state.draconic?.count ?? 0)} Draconic ascension${S.state.draconic?.count === 1 ? '' : 's'}</div>`;
+        } else if (asc >= DRACONIC_AT) {
+          sub = '<span class="pill" style="color:#fde047">Ready</span>';
+          body = `<div>You have ${fmtDec(asc)} ascensions: the door under the cabin opens the next time you walk in.</div>`;
+          end = '<div class="tip-sep"></div><div class="muted">Click to walk into the Cabin and open it.</div>';
+        } else {
+          sub = `<span class="pill"><span style="color:#fca5a5">Asc ${fmtDec(asc)}/${DRACONIC_AT}</span></span>`;
+          body = `<div style="color:#fca5a5">Opens at ${DRACONIC_AT} ascensions <span class="muted">(you have ${fmtDec(asc)})</span></div>`;
+          end = '';
+        }
       }
       setHtml(el, `<span class="nm">${l.name}</span>${sub}`);
-      tips.set(el, `<div class="tip-title">${l.name === 'Town' ? 'The Village' : l.name === 'Farm' ? 'The Garden' : 'The Cabin'}</div>${body}${tipEnd(l)}`);
+      tips.set(el, `<div class="tip-title">The ${l.name}</div>${body}${end}`);
     });
   };
 
@@ -533,12 +543,17 @@ const zoneMap = async () => {
   };
 
   const goLand = async (target) => {
+    // A shut basement: the Cabin opens it once there are enough ascensions (the game's own walk-in)
+    if (target === 'basement' && !basementOpen()) {
+      if (S.state.ascension.count < DRACONIC_AT) return;
+      target = 'cabin';
+    }
     const h = getHome();
     if (!h) return console.warn("[zone map] The game's scene hasn't drawn a frame yet; try again in a moment");
     if (h.busy || h.place === target) return;
     if (h.place) {
       // Between two homestead places: fade straight there, coming in through the door on the side
-      // you came from (the Town is left of the Farm, which is left of the Cabin)
+      // you came from (the Basement is left of the Cabin: its stairs come up through the Cabin's left door)
       const from = LAND_ORDER.indexOf(target) < LAND_ORDER.indexOf(h.place) ? 1 : -1;
       h.fadeTo(() => { h.arrive(target, from); render(); });
       return;
