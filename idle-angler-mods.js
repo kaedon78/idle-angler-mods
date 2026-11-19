@@ -2059,7 +2059,8 @@ const weatherForecast = async () => {
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
 //  - Ascend: how many times you've ascended, progress toward the next ascension, the Ascend button,
 //    and the Oracle's "ascend for me"
-//  - Foreman: what it's buying (off, save up for the top of the list, or the next one you can afford)
+//  - Foreman: the upgrade it buys next (as the Upgrades window draws it, with its buy button), and what
+//    it's buying (off, save up for the top of the list, or the next one you can afford)
 //  - Chests: how many you have, and Open all
 //  - Upgrades in your bag: only the gear that's better for your build than what you're wearing
 // Every button and dropdown here is the game's own: the panel sits inside the game's window layer, so
@@ -2072,7 +2073,7 @@ const weatherForecast = async () => {
 const summaryPanel = async () => {
   const mod = (path) => import(new URL(path, location.origin).href);
   const S = await mod('/src/state.js');
-  const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS } = await mod('/src/data.js');
+  const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS, UPGRADE_BY_ID } = await mod('/src/data.js');
   const { fmt, fmtHtml, fmtDecHtml, moneyHtml, hex } = await mod('/src/format.js');
   const { GAIN_STATS, tenPercentPoints } = await mod('/src/minmax.js');
   const { describeBounty, bountyProgress, rewardTier } = await mod('/src/bounties.js');
@@ -2203,12 +2204,56 @@ const summaryPanel = async () => {
   }
 
   // ---------- The Foreman (as the Upgrades window's Automation tab draws it) ----------
+  // Its next upgrade: state.js nextAutoUpgrade, which isn't exported. The first on its list that isn't maxed,
+  // or with "buy the next one I can afford", the first it can pay a level of now.
+  function foremanNext() {
+    const set = S.state.settings;
+    const discount = S.upgradeDiscount();
+    for (const id of set.autoUpgradeOrder ?? []) {
+      const up = UPGRADE_BY_ID[id];
+      if (!up || S.upgradeLevel(id) >= up.maxLevel) continue;
+      if (!set.autoUpgradeNextAfforded || S.state.gold >= S.bulkCost(up, S.upgradeLevel(id), 1, discount)) return up;
+    }
+    return null;
+  }
+  // The upgrade's row as the Upgrades window draws it (ui.js renderUpgrades, effectText, milestoneText), without
+  // its fold button. Its buy button buys what the window's x1 / x10 / Max would.
+  function upgradeRowHtml(up) {
+    const level = S.upgradeLevel(up.id);
+    const plan = S.purchasePlan(up, level, S.state.gold, S.upgradeDiscount());
+    const info = STATS[up.stat];
+    const effect = !info
+      ? ''
+      : up.type === 'mult'
+        ? `×${fmtDecHtml(up.perLevel)} ${info.name} per level · now ×${fmtDecHtml(S.leveledEffect(up, level))}`
+        : `+${fmtDecHtml(up.perLevel)}${info.unit} ${info.name} per level · now +${fmtDecHtml(S.leveledEffect(up, level))}${info.unit}`;
+    const next = S.nextMilestone(up, level);
+    const milestone = next ? `<div class="milestone">★ Lv ${next}: +${Math.round((up.milestone - 1) * 100)}% of its effect again <span class="muted">(${next - level} to go)</span></div>` : '';
+    const sign = up.type === 'mult' ? ['×', '#f472b6'] : ['+', '#38bdf8'];
+    return `<ul class="list qs-next-up"><li class="row">
+        <span class="icon" style="--c:${sign[1]}">${sign[0]}</span>
+        <div class="row-main">
+          <div class="name">${esc(up.name)} <span class="muted">Lv ${level}/${up.maxLevel}</span></div>
+          <div class="sub">${effect}</div>
+          ${milestone}
+        </div>
+        <button class="btn primary buy" data-action="buy-upgrade" data-id="${up.id}" ${disabled(!plan.affordable)}>
+          ${plan.n > 1 ? `+${plan.n} · ` : ''}<span class="amt">${moneyHtml(plan.cost)}</span>
+        </button>
+      </li></ul>`;
+  }
   function foremanHtml() {
     if (!S.hasAutomation('foreman')) return lockNote('foreman');
     const set = S.state.settings;
     const mode = !set.autoUpgrade ? 'off' : set.autoUpgradeNextAfforded ? 'next' : 'save';
     const listed = (set.autoUpgradeOrder ?? []).length;
-    return `<label class="setting-select">Buying <select data-change="autoup-mode" aria-label="How Foreman buys upgrades">${[
+    const up = foremanNext();
+    const nextRow = up
+      ? upgradeRowHtml(up)
+      : listed
+        ? `<p class="muted small-text">${mode === 'next' ? 'Nothing on its list you can afford a level of yet' : 'Everything on its list is maxed'}</p>`
+        : '';
+    return `${nextRow}<label class="setting-select">Buying <select data-change="autoup-mode" aria-label="How Foreman buys upgrades">${[
       ['off', 'Off'],
       ['save', 'Save up for the top of the list'],
       ['next', 'Buy the next one I can afford'],
@@ -2337,6 +2382,7 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel .qs-chests{display:flex;align-items:center;gap:8px}
 #summary-panel .qs-chests .row-main{flex:1}
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
+#summary-panel .qs-next-up{margin:4px 0 0}
 #qs-pills:has(#measured-rate-wrap) .qs-pills-off{display:none}
 /* Top to bottom: the pills, the best +10%, Auto-click (the pills mod appends its two; this orders them) */
 #qs-pills{display:flex;flex-direction:column}
@@ -2585,7 +2631,7 @@ const MODS = [
   {
     id: 'summaryPanel',
     name: "Quicklinks",
-    desc: "A tab on the right edge that slides out your income a second, gear sets, bounties, ascending, the Foreman, chests and the upgrades in your bag",
+    desc: "A tab on the right edge that slides out your income a second, gear sets, bounties, ascending, the Foreman and its next upgrade, chests and the upgrades in your bag",
     start: summaryPanel,
     stop: 'stopSummaryPanel',
   },
