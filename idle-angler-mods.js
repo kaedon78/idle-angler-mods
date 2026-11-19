@@ -687,8 +687,8 @@ const zoneMap = async () => {
 // the gold you actually earned, the fish you caught, the chests you found and the XP you gained, each
 // per second. They show as pills at the top of the Quicklinks panel while it's on, or else in the top bar
 // to the right of your Emberscales (styled like the game's own +X/s pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
-// in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle in the top bar clicks the
-// water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
+// in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle under them (or beside them in the
+// top bar) clicks the water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
 // stopGoldLogger()
 //
 // How it works: it samples counters the game only ever adds to:
@@ -791,7 +791,8 @@ const incomePills = async () => {
     'font:600 17px var(--num);font-variant-numeric:lining-nums tabular-nums;text-shadow:1px 1px 0 #000}' +
     '#qs-pills .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
     'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
-    '#qs-pills .rate .per{color:#8fbf6c}';
+    '#qs-pills .rate .per{color:#8fbf6c}' +
+    '#qs-pills #measured-autoclick-wrap{margin:6px 0 4px;font:600 17px var(--num);text-shadow:1px 1px 0 #000}';
   document.head.append(style);
   // Each bar runs for the period in use when it's made (it can change: setGoldLoggerPeriod)
   const countdownBar = () => {
@@ -821,15 +822,16 @@ const incomePills = async () => {
   const xpPill = makePill('measured-xp-rate');
   const pills = [goldPill, fishPill, chestPill, xpPill];
   wrap.append(...pills);
-  // At the top of the Quicklinks panel while it's running (it sends idle-angler-quicklinks as it starts
-  // and stops), else in the top bar right of the Emberscales. Moving a node restarts its CSS animation,
-  // so the countdown bars are set back to the time already measured.
+  // The pills and the auto-click toggle (autoWrap, below): at the top of the Quicklinks panel while it's
+  // running (it sends idle-angler-quicklinks as it starts and stops), else in the top bar right of the
+  // Emberscales. Moving a node restarts its CSS animation, so the countdown bars are set back to the time
+  // already measured.
   const placePills = () => {
     const host = document.getElementById('qs-pills');
     if (host ? wrap.parentElement === host : !ember || (wrap.parentElement && wrap.previousElementSibling === ember)) return;
-    wrap.style.minWidth = ''; // the top bar fixes' ratchet: it measures again there
-    if (host) host.append(wrap);
-    else ember.after(wrap);
+    wrap.style.minWidth = autoWrap.style.minWidth = ''; // the top bar fixes' ratchet: it measures again there
+    if (host) host.append(wrap, autoWrap);
+    else ember.after(wrap, autoWrap);
     const done = performance.now() - last.t;
     for (const bar of wrap.querySelectorAll('.measured-countdown')) bar.style.animationDelay = `-${Math.round(done)}ms`;
   };
@@ -978,7 +980,6 @@ const incomePills = async () => {
   const minusBtn = stepBtn('−', -1);
   const plusBtn = stepBtn('+', 1);
   autoWrap.append(autoBtn, minusBtn, plusBtn);
-  ember?.after(autoWrap); // auto-click stays in the top bar, wherever the pills are
   placePills();
   addEventListener('idle-angler-quicklinks', placePills);
   attachTip(autoBtn);
@@ -2051,7 +2052,8 @@ const weatherForecast = async () => {
 // It adds a tab on the right edge of the page; click it to slide out a panel with what most needs you
 // right now. While the panel is out, the game shrinks to make room beside it (nothing is covered);
 // click the tab again to put it away. The panel shows:
-//  - Per second: the income pills (that mod puts them here while both run); Open opens the Min-maxer
+//  - Per second: the income pills and Auto-click (that mod puts them here while both run); Open opens
+//    the Min-maxer
 //  - Character: your saved gear sets; click one to put it on, ⟳ saves what you're wearing over it,
 //    ✕ deletes it, and "+ Save what you're wearing" adds a new one (as in Angler > Character)
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
@@ -2348,7 +2350,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   ).join('')}</div>`;
   const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
   pillsHost.id = 'qs-pills';
-  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them here.</p>';
+  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them and Auto-click here.</p>';
   panel.querySelector('[data-qs="stats"] .goto').title = 'Open the Min-maxer';
   layer.append(panel);
   dispatchEvent(new Event('idle-angler-quicklinks'));
@@ -2480,7 +2482,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     document.body.classList.remove('qs-open');
     document.documentElement.style.removeProperty('--qs-w');
     panel.remove();
-    dispatchEvent(new Event('idle-angler-quicklinks')); // the pills go back to the top bar
+    dispatchEvent(new Event('idle-angler-quicklinks')); // the pills and Auto-click go back to the top bar
     tab.remove();
     style.remove();
     dispatchEvent(new Event('resize'));
@@ -2515,7 +2517,7 @@ const MODS = [
   {
     id: 'incomePills',
     name: "Income pills and auto-click",
-    desc: "Gold, fish, chests and XP a second, measured each minute, at the top of Quicklinks (or in the top bar without it), and an Auto-click toggle (1-15 clicks a second) that starts on",
+    desc: "Gold, fish, chests and XP a second, measured each minute, and an Auto-click toggle (1-15 clicks a second) that starts on, at the top of Quicklinks (or in the top bar without it)",
     start: incomePills,
     stop: 'stopGoldLogger',
     // Shown under the mod's row; each is a localStorage key the mod reads as it starts
