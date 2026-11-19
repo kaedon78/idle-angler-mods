@@ -680,11 +680,11 @@ const zoneMap = async () => {
 // =====================================================================================================
 // Income pills and auto-click (was gold-income-logger.js)
 //
-// Every 60 s it measures, over that minute, the gold you actually earned, the fish you caught, the
-// chests you found and the XP you gained, each per second. They show as pills in the top bar to the
-// right of your Emberscales (styled like the game's own +X/s pill). Hover a pill for details; the fish
-// pill breaks the catch down by rarity. A shaded bar in each pill shrinks as the minute runs out, and
-// changing your equipped gear restarts the minute. An "Auto-click" toggle in the top bar clicks the
+// Every minute (or every 5, 15 or 30 s: "Measure over" in Settings > Mods) it measures, over that time,
+// the gold you actually earned, the fish you caught, the chests you found and the XP you gained, each
+// per second. They show as pills in the top bar to the right of your Emberscales (styled like the game's
+// own +X/s pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
+// in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle in the top bar clicks the
 // water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
 // stopGoldLogger()
 //
@@ -703,7 +703,17 @@ const zoneMap = async () => {
 //    don't reset it.
 // =====================================================================================================
 const incomePills = async () => {
-  const PERIOD_MS = 60_000;
+  // How long each reading measures over: the "Measure over" choice in Settings > Mods (the manager's
+  // MODS options), kept in this browser. A change comes in through window.setGoldLoggerPeriod (below),
+  // which starts the measuring over without restarting the mod (that would turn auto-click back on).
+  let PERIOD_MS = (() => {
+    try {
+      const ms = Number(localStorage.getItem('idle-angler-income-period'));
+      return [5_000, 15_000, 30_000, 60_000].includes(ms) ? ms : 60_000;
+    } catch {
+      return 60_000;
+    }
+  })();
 
   // window.game only exists for admins/localhost, so import the game's own modules instead.
   // ES modules are singletons per URL, so this returns the live instance the game is using.
@@ -771,10 +781,15 @@ const incomePills = async () => {
   style.textContent =
     '#measured-rate-wrap .rate{position:relative;overflow:hidden;isolation:isolate}' +
     '.measured-countdown{position:absolute;inset:1px;z-index:-1;border-radius:inherit;pointer-events:none;' +
-    `transform-origin:left center;background:rgba(155,227,106,.4);animation:measured-countdown ${PERIOD_MS}ms linear forwards}` +
+    'transform-origin:left center;background:rgba(155,227,106,.4);animation:measured-countdown 60s linear forwards}' +
     '@keyframes measured-countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}';
   document.head.append(style);
-  const countdownBar = () => Object.assign(document.createElement('span'), { className: 'measured-countdown' });
+  // Each bar runs for the period in use when it's made (it can change: setGoldLoggerPeriod)
+  const countdownBar = () => {
+    const bar = Object.assign(document.createElement('span'), { className: 'measured-countdown' });
+    bar.style.animationDuration = `${PERIOD_MS}ms`;
+    return bar;
+  };
 
   const ember = document.getElementById('emberscales')?.closest('.currency');
   const wrap = document.createElement('div');
@@ -1074,13 +1089,13 @@ const incomePills = async () => {
   const GEAR_MARK = '<!--gear-changed-->';
   let lastGear = gearKey();
   let id;
-  const restartWindow = () => {
+  const restartWindow = (why = 'Gear changed') => {
     clearInterval(id);
     last = sample();
     hiddenDuringWindow = document.visibilityState === 'hidden';
     const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const notice =
-      `${GEAR_MARK}<div class="tip-sep"></div><div style="color:#fde68a">Gear changed at ${at}, so measuring restarted. ` +
+      `${GEAR_MARK}<div class="tip-sep"></div><div style="color:#fde68a">${why} at ${at}, so measuring restarted. ` +
       `These numbers are from before the change until the new reading lands.</div>`;
     for (const p of pills) {
       p.querySelector('.measured-countdown')?.remove();
@@ -1098,7 +1113,13 @@ const incomePills = async () => {
   }, 1000);
 
   id = setInterval(tick, PERIOD_MS);
+  window.setGoldLoggerPeriod = (ms) => {
+    if (![5_000, 15_000, 30_000, 60_000].includes(ms) || ms === PERIOD_MS) return;
+    PERIOD_MS = ms;
+    restartWindow(`Measuring over ${ms < 60_000 ? `${ms / 1000} s` : '1 min'} from now`);
+  };
   window.stopGoldLogger = () => {
+    delete window.setGoldLoggerPeriod;
     clearInterval(id);
     clearInterval(gearTimer);
     clearInterval(autoTipTimer);
@@ -2435,6 +2456,16 @@ const MODS = [
     desc: "Gold, fish, chests and XP a second, measured each minute, in the top bar, and an Auto-click toggle (1-15 clicks a second) that starts on",
     start: incomePills,
     stop: 'stopGoldLogger',
+    // Shown under the mod's row; each is a localStorage key the mod reads as it starts
+    options: [
+      {
+        key: 'idle-angler-income-period',
+        label: 'Measure over',
+        values: [['5000', '5 s'], ['15000', '15 s'], ['30000', '30 s'], ['60000', '1 min']],
+        fallback: '60000',
+        apply: (value) => window.setGoldLoggerPeriod?.(Number(value)), // live, without a restart
+      },
+    ],
   },
   {
     id: 'buildSwitcher',
@@ -2522,8 +2553,26 @@ style.textContent = `
 .im-pane .im-state.on{color:#86efac}
 .im-pane .im-state.off{opacity:.65}
 .im-pane .im-state.failed{color:#fca5a5}
+.im-pane .im-option{margin:-2px 0 8px 30px}
 `;
 document.head.append(style);
+
+const readOption = (o) => {
+  try {
+    const v = localStorage.getItem(o.key);
+    return o.values.some(([value]) => value === v) ? v : o.fallback;
+  } catch {
+    return o.fallback;
+  }
+};
+// A mod's option: a dropdown in the game's own setting-select style, outside the row's label so a click
+// on it doesn't tick the box
+const optionHtml = (m, o) => {
+  const now = readOption(o);
+  const opts = o.values.map(([value, text]) => `<option value="${value}" ${value === now ? 'selected' : ''}>${esc(text)}</option>`).join('');
+  return `
+    <label class="setting-select im-option">${esc(o.label)} <select data-im-opt="${m.id}" data-key="${o.key}">${opts}</select></label>`;
+};
 
 function paneHtml() {
   const row = (m) => {
@@ -2533,7 +2582,7 @@ function paneHtml() {
     <label class="setting">
       <input type="checkbox" data-im="${m.id}" ${wanted(m) ? 'checked' : ''} ${starting.has(m.id) ? 'disabled' : ''}/>
       <span><b>${esc(m.name)}</b><span class="sub">${esc(m.desc)}</span><span class="im-state ${state[0]}">${esc(state[1])}</span></span>
-    </label>`;
+    </label>${(m.options ?? []).map((o) => optionHtml(m, o)).join('')}`;
   };
   return `
     <h2>UI mods</h2>
@@ -2643,6 +2692,27 @@ function onClick(e) {
 layer.addEventListener('click', onClick, true);
 
 function onChange(e) {
+  const pick = e.target.closest('select[data-im-opt]');
+  if (pick) {
+    pick.blur();
+    try {
+      localStorage.setItem(pick.dataset.key, pick.value);
+    } catch {
+      // storage blocked: the mod can't read it back, so it keeps its default
+    }
+    // The mod reads its options as it starts. A running one takes the change live if its option says how,
+    // and is restarted otherwise
+    const m = MODS.find((x) => x.id === pick.dataset.imOpt);
+    const o = m?.options?.find((x) => x.key === pick.dataset.key);
+    if (m && running(m)) {
+      if (o?.apply) o.apply(pick.value);
+      else {
+        turnOff(m);
+        turnOn(m);
+      }
+    }
+    return;
+  }
   const box = e.target.closest('input[data-im]');
   if (!box) return;
   box.blur(); // the game doesn't redraw a window while one of its boxes has focus
