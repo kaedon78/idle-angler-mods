@@ -1636,19 +1636,20 @@ const weatherForecast = async () => {
 #wf-win[hidden]{display:none}
 #wf-win.wf-still{animation:none}
 #wf-win .win-title .wf-ticon{width:1.15em;height:auto;image-rendering:pixelated}
-#wf-win .wf-ic{display:block;width:22px;height:20px;image-rendering:pixelated;justify-self:center}
-#wf-win .wf-ic.big{width:44px;height:40px}
-#wf-win .wf-ic.mid{width:28px;height:26px}
-#wf-win .wf-ic.sm{width:14px;height:13px;display:inline-block;vertical-align:-2px}
-#wf-win .wf-muted{color:var(--muted)}
-#wf-win .wf-small{font-size:12px}
-#wf-win .wf-now{display:grid;grid-template-columns:auto 1fr auto;gap:4px 14px;align-items:center;padding:10px 12px;margin-bottom:10px;
+/* The now box's rules also style its copy at the top of Quicklinks (#qs-weather) */
+:is(#wf-win,#qs-weather) .wf-ic{display:block;width:22px;height:20px;image-rendering:pixelated;justify-self:center}
+:is(#wf-win,#qs-weather) .wf-ic.big{width:44px;height:40px}
+:is(#wf-win,#qs-weather) .wf-ic.mid{width:28px;height:26px}
+:is(#wf-win,#qs-weather) .wf-ic.sm{width:14px;height:13px;display:inline-block;vertical-align:-2px}
+:is(#wf-win,#qs-weather) .wf-muted{color:var(--muted)}
+:is(#wf-win,#qs-weather) .wf-small{font-size:12px}
+:is(#wf-win,#qs-weather) .wf-now{display:grid;grid-template-columns:auto 1fr auto;gap:4px 14px;align-items:center;padding:10px 12px;margin-bottom:10px;
   background:linear-gradient(90deg,color-mix(in srgb,var(--wc) 16%,transparent),rgba(0,0,0,.22));box-shadow:inset 3px 0 0 var(--wc)}
-#wf-win .wf-now .wf-ic{grid-row:span 2}
-#wf-win .wf-now .wf-name{font:400 24px/1.1 var(--title);color:var(--wc)}
-#wf-win .wf-now .wf-clock{font:600 15px var(--num);text-shadow:1px 1px 0 #000}
-#wf-win .wf-now .wf-side{grid-row:span 2;display:grid;gap:3px;justify-items:end;text-align:right;font-size:12px}
-#wf-win .wf-now .wf-desc{grid-column:2;font-size:12px}
+:is(#wf-win,#qs-weather) .wf-now .wf-ic{grid-row:span 2}
+:is(#wf-win,#qs-weather) .wf-now .wf-name{font:400 24px/1.1 var(--title);color:var(--wc)}
+:is(#wf-win,#qs-weather) .wf-now .wf-clock{font:600 15px var(--num);text-shadow:1px 1px 0 #000}
+:is(#wf-win,#qs-weather) .wf-now .wf-side{grid-row:span 2;display:grid;gap:3px;justify-items:end;text-align:right;font-size:12px}
+:is(#wf-win,#qs-weather) .wf-now .wf-desc{grid-column:2;font-size:12px}
 /* The tab row is the game's own (.win-tabs.panel-tabs, first in the body: the close button sits at its right end).
    Its sides are pulled out by the body's 6px padding, not the 8px of .panel-tabs' margin, which ran 2px past
    the body and gave it a sideways scrollbar */
@@ -2020,7 +2021,28 @@ const weatherForecast = async () => {
   };
   window.addEventListener('keydown', onKey, true);
 
-  const timer = setInterval(() => render(), 1000);
+  // The now box at the top of the Quicklinks panel too, when that mod is on (it makes the empty #qs-weather),
+  // whether this window is open or not. A click on it opens the window.
+  let qlHost = null;
+  let qlLast = '';
+  const renderQuicklinks = () => {
+    const host = document.getElementById('qs-weather');
+    if (!host) return;
+    if (host !== qlHost) [qlHost, qlLast] = [host, ''];
+    const html = nowHtml(serverNow());
+    if (html !== qlLast) host.innerHTML = qlLast = html;
+  };
+  const onQuicklinks = (e) => {
+    if (e.button !== 0 || !e.target.closest('#qs-weather')) return;
+    if (!isOpen()) open();
+  };
+  document.addEventListener('click', onQuicklinks);
+  renderQuicklinks();
+
+  const timer = setInterval(() => {
+    render();
+    renderQuicklinks();
+  }, 1000);
   const onResize = () => {
     if (!isOpen()) return;
     if (narrow()) place();
@@ -2038,6 +2060,9 @@ const weatherForecast = async () => {
     root.removeEventListener('pointerdown', onRootDown);
     chip?.removeEventListener('click', onChip);
     chip?.classList.remove('wf-link');
+    document.removeEventListener('click', onQuicklinks);
+    const host = document.getElementById('qs-weather');
+    if (host) host.innerHTML = '';
     win.remove();
     style.remove();
     delete window.stopWeatherForecast;
@@ -2052,6 +2077,7 @@ const weatherForecast = async () => {
 // It adds a tab on the right edge of the page; click it to slide out a panel with what most needs you
 // right now. While the panel is out, the game shrinks to make room beside it (nothing is covered);
 // click the tab again to put it away. The panel shows:
+//  - At the top, the weather now (the forecast mod draws it; a click opens the forecast)
 //  - Per second: the income pills and Auto-click (that mod puts them here while both run), and between
 //    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
 //  - Character: your saved gear sets; click one to put it on, ⟳ saves what you're wearing over it,
@@ -2367,6 +2393,10 @@ body.qs-open .corner-btn,body.qs-open #bmc-wbtn{margin-right:var(--qs-w)}
   border:12px solid;border-image:url('/assets/ui/ornate/forest/panel_main_normal.png') 32 fill / 16px / 0 stretch;background:#1e2c21;background-clip:padding-box;
   transform:translateX(100%);visibility:hidden;transition:transform ${SLIDE_MS}ms ease-out,visibility 0s linear ${SLIDE_MS}ms}
 body.qs-open #summary-panel{transform:none;visibility:visible;transition:transform ${SLIDE_MS}ms ease-out,visibility 0s}
+#qs-weather{flex:none;margin:2px 4px 6px;cursor:pointer}
+#qs-weather:empty{display:none}
+#qs-weather .wf-now{margin:0}
+#qs-weather:hover .wf-now{filter:brightness(1.12)}
 #summary-panel .qs-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:2px 4px 8px}
 #summary-panel section{margin:0 0 10px}
 #summary-panel h3{display:flex;align-items:baseline;gap:8px;margin:6px 0 4px;padding:4px 8px;font-size:1em;color:var(--accent);
@@ -2440,7 +2470,8 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   const panel = document.createElement('aside');
   panel.id = 'summary-panel';
   panel.setAttribute('aria-label', 'Quicklinks');
-  panel.innerHTML = `<div class="qs-body">${SECTIONS.map(
+  // The weather now, at the top above the sections: the forecast mod draws its now box into it (empty without it)
+  panel.innerHTML = `<div id="qs-weather" title="Open the forecast (W)"></div><div class="qs-body">${SECTIONS.map(
     (s) => `<section data-qs="${s.id}"><h3><button type="button" class="qs-fold" aria-expanded="true" title="Collapse"><span class="qs-chev" aria-hidden="true">▾</span>${esc(s.title)}</button> <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
   ).join('')}</div>`;
   const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
