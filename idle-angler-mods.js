@@ -1631,7 +1631,6 @@ const weatherForecast = async () => {
 #wf-win .wf-tabs{margin-left:-6px;margin-right:-6px}
 #wf-win .win-body{overflow-x:hidden}
 #wf-win .wf-nowbox,#wf-win .wf-view{max-width:100%;box-sizing:border-box}
-#wf-win .wf-tabs .win-tab kbd{display:none}
 #wf-win .wf-head{display:flex;align-items:baseline;gap:8px;padding:8px 6px 4px;font-weight:700;color:var(--accent);border-bottom:1px solid #3a4a30}
 #wf-win .wf-head:first-child{padding-top:0}
 #wf-win .wf-row{display:grid;grid-template-columns:62px 30px minmax(0,1fr) auto;gap:2px 10px;align-items:center;padding:5px 6px;
@@ -1677,7 +1676,6 @@ const weatherForecast = async () => {
   win.innerHTML = `
     <header class="win-head">
       <div class="win-title"><img class="wf-ticon" src="/assets/icons/hud/rain.svg" alt=""><h2>Forecast</h2></div>
-      <kbd>W</kbd>
       <button class="win-close" aria-label="Close Forecast">✕</button>
     </header>
     <div class="win-body">
@@ -1947,7 +1945,8 @@ const weatherForecast = async () => {
     if (!isOpen()) return;
     const nowS = serverNow();
     nowBox.innerHTML = nowHtml(nowS);
-    const tabs = TABS.map((t) => `<button class="win-tab ${t.id === tab ? 'active' : ''}" data-wf-tab="${t.id}">${t.name}</button>`).join('');
+    // The hotkey on the first tab, as the game shows a window's key (ui.js tabBar)
+    const tabs = TABS.map((t, i) => `<button class="win-tab ${t.id === tab ? 'active' : ''}" data-wf-tab="${t.id}">${t.name}${i === 0 ? ' <kbd>W</kbd>' : ''}</button>`).join('');
     if (force || tabs !== lastTabs) tabsBox.innerHTML = lastTabs = tabs;
     // The list only changes when its text does (minutes), so hovering and tooltips aren't disturbed every second
     const html = TABS.find((t) => t.id === tab).html(nowS);
