@@ -2066,8 +2066,8 @@ const weatherForecast = async () => {
 // Every button and dropdown here is the game's own: the panel sits inside the game's window layer, so
 // a click runs exactly what the same button in the game's windows runs (the Ascend button asks first,
 // Open all shows what came out, a click on gear opens the game's Put on / Sell / Lock menu,
-// Ctrl-click sells and right-click locks, as in your bag). Each section's title opens the game's
-// window for it. The panel takes the Altar's dark red look while you're in the basement.
+// Ctrl-click sells and right-click locks, as in your bag). Each section's Open opens the game's
+// window for it; a click on its title (or ▾) collapses it, which this browser remembers. The panel takes the Altar's dark red look while you're in the basement.
 // Stop it (and remove the panel) with:  stopSummaryPanel(), or untick it in Settings > Mods
 // =====================================================================================================
 const summaryPanel = async () => {
@@ -2088,6 +2088,7 @@ const summaryPanel = async () => {
   if (!layer || !app) return console.warn('[summary] The game page was not found (#windows, #app)');
 
   const STORE_KEY = 'idle-angler-summary-open';
+  const FOLD_KEY = 'idle-angler-quicklinks-collapsed'; // section ids, as JSON
   const MAX_GEAR = 450;
   const SLIDE_MS = 180;
   // The panel's width: wide enough for each bounty's name on one line, between these (and never more
@@ -2371,6 +2372,12 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel h3{display:flex;align-items:baseline;gap:8px;margin:6px 0 4px;padding:4px 8px;font-size:1em;color:var(--accent);
   background:#17221a;box-shadow:inset 0 0 0 1px rgba(201,207,210,.14)}
 #summary-panel h3 .goto{margin-left:auto;font-size:.85em;font-weight:400}
+#summary-panel .qs-fold{display:inline-flex;align-items:baseline;gap:6px;padding:0;font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+#summary-panel .qs-chev{display:inline-block;width:1em;text-align:center;color:var(--muted);transition:transform .12s}
+#summary-panel .qs-fold:hover .qs-chev{color:var(--accent)}
+#summary-panel .qs-collapsed .qs-chev{transform:rotate(-90deg)}
+#summary-panel .qs-collapsed .qs-content{display:none}
+#summary-panel section.qs-collapsed{margin-bottom:4px}
 #summary-panel .qs-count{color:var(--muted);font-weight:400}
 #summary-panel .bounties.list{margin:4px 0}
 #summary-panel .bounty-row .name{font-size:.95em}
@@ -2434,7 +2441,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   panel.id = 'summary-panel';
   panel.setAttribute('aria-label', 'Quicklinks');
   panel.innerHTML = `<div class="qs-body">${SECTIONS.map(
-    (s) => `<section data-qs="${s.id}"><h3>${esc(s.title)} <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
+    (s) => `<section data-qs="${s.id}"><h3><button type="button" class="qs-fold" aria-expanded="true" title="Collapse"><span class="qs-chev" aria-hidden="true">▾</span>${esc(s.title)}</button> <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
   ).join('')}</div>`;
   const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
   pillsHost.id = 'qs-pills';
@@ -2444,8 +2451,41 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   dispatchEvent(new Event('idle-angler-quicklinks'));
   const parts = SECTIONS.map((s) => {
     const el = panel.querySelector(`[data-qs="${s.id}"]`);
-    return { ...s, content: el.querySelector('.qs-gains') ?? el.querySelector('.qs-content'), countEl: el.querySelector('.qs-count'), last: null, lastCount: null };
+    return { ...s, el, content: el.querySelector('.qs-gains') ?? el.querySelector('.qs-content'), countEl: el.querySelector('.qs-count'), last: null, lastCount: null };
   });
+
+  // ---------- Collapsing a section ----------
+  // A collapsed section keeps its title, count and Open; its contents aren't drawn until it's opened again
+  let folded = new Set();
+  try {
+    folded = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) ?? '[]'));
+  } catch {
+    // storage blocked or unreadable: everything starts open
+  }
+  const showFold = (p) => {
+    const shut = folded.has(p.id);
+    p.el.classList.toggle('qs-collapsed', shut);
+    const btn = p.el.querySelector('.qs-fold');
+    btn.setAttribute('aria-expanded', String(!shut));
+    btn.title = shut ? 'Expand' : 'Collapse';
+  };
+  for (const p of parts) showFold(p);
+  const onFold = (e) => {
+    const btn = e.target.closest('.qs-fold');
+    if (!btn) return;
+    const p = parts.find((x) => x.el.contains(btn));
+    if (folded.has(p.id)) folded.delete(p.id);
+    else folded.add(p.id);
+    try {
+      localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
+    } catch {
+      // storage blocked: it's forgotten on reload
+    }
+    showFold(p);
+    btn.blur();
+    setTimeout(render, 0);
+  };
+  panel.addEventListener('click', onFold);
 
   const tab = document.createElement('button');
   tab.type = 'button';
@@ -2470,6 +2510,12 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     if (!isOpen || pressing) return;
     const focused = document.activeElement;
     for (const p of parts) {
+      const count = p.count?.() ?? '';
+      if (count !== p.lastCount) {
+        p.countEl.textContent = count;
+        p.lastCount = count;
+      }
+      if (folded.has(p.id)) continue; // drawn when it's opened again
       if (p.content.contains(focused) && focused.matches('select')) continue;
       let html;
       try {
@@ -2481,11 +2527,6 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
         p.content.innerHTML = html;
         p.last = html;
       }
-      const count = p.count?.() ?? '';
-      if (count !== p.lastCount) {
-        p.countEl.textContent = count;
-        p.lastCount = count;
-      }
     }
     fitWidth();
   }
@@ -2494,7 +2535,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   // is in an inline .qs-fit, so its own width is the width it needs on one line.
   let width = MIN_W;
   function fitWidth() {
-    const lines = [...panel.querySelectorAll('.bounty-row .qs-line')];
+    const lines = [...panel.querySelectorAll('.bounty-row .qs-line')].filter((l) => l.offsetParent);
     if (!lines.length) return;
     let spare = Infinity;
     for (const line of lines) spare = Math.min(spare, line.clientWidth - line.firstElementChild.getBoundingClientRect().width);
@@ -2567,6 +2608,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     cancelAnimationFrame(slideFrame);
     removeEventListener('pointerup', onRelease);
     removeEventListener('pointercancel', onRelease);
+    panel.removeEventListener('click', onFold);
     document.body.classList.remove('qs-open');
     document.documentElement.style.removeProperty('--qs-w');
     panel.remove();
