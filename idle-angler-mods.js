@@ -1094,7 +1094,10 @@ const buildSwitcher = async () => {
   btn.setAttribute('aria-label', 'Builds');
   btn.setAttribute('aria-haspopup', 'menu');
   btn.innerHTML = '<span class="bs-num"></span><kbd>1-5</kbd>';
-  bar.insertBefore(btn, angler ?? bar.firstChild);
+  // The bar's buttons sit in groups (.ab-group), so the Angler button isn't a child of the bar itself:
+  // insertBefore on the bar threw, and the key never appeared
+  if (angler) angler.before(btn);
+  else bar.prepend(btn);
   const num = btn.querySelector('.bs-num');
 
   // ---------- The status line ----------
