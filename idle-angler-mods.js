@@ -685,8 +685,8 @@ const zoneMap = async () => {
 //
 // Every minute (or every 5, 15 or 30 s: "Measure over" in Settings > Mods) it measures, over that time,
 // the gold you actually earned, the fish you caught, the chests you found and the XP you gained, each
-// per second. They show as pills in the top bar to the right of your Emberscales (styled like the game's
-// own +X/s pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
+// per second. They show as pills at the top of the Quicklinks panel while it's on, or else in the top bar
+// to the right of your Emberscales (styled like the game's own +X/s pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
 // in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle in the top bar clicks the
 // water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
 // stopGoldLogger()
@@ -785,7 +785,13 @@ const incomePills = async () => {
     '#measured-rate-wrap .rate{position:relative;overflow:hidden;isolation:isolate}' +
     '.measured-countdown{position:absolute;inset:1px;z-index:-1;border-radius:inherit;pointer-events:none;' +
     'transform-origin:left center;background:rgba(155,227,106,.4);animation:measured-countdown 60s linear forwards}' +
-    '@keyframes measured-countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}';
+    '@keyframes measured-countdown{from{transform:scaleX(1)}to{transform:scaleX(0)}}' +
+    // In the Quicklinks panel: the top bar's .currency and .rate rules (ui.css scopes them to #topbar)
+    '#qs-pills #measured-rate-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;' +
+    'font:600 17px var(--num);font-variant-numeric:lining-nums tabular-nums;text-shadow:1px 1px 0 #000}' +
+    '#qs-pills .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
+    'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
+    '#qs-pills .rate .per{color:#8fbf6c}';
   document.head.append(style);
   // Each bar runs for the period in use when it's made (it can change: setGoldLoggerPeriod)
   const countdownBar = () => {
@@ -815,8 +821,19 @@ const incomePills = async () => {
   const xpPill = makePill('measured-xp-rate');
   const pills = [goldPill, fishPill, chestPill, xpPill];
   wrap.append(...pills);
-  if (ember) ember.after(wrap);
-  else console.warn("[gold/s] Emberscales counter not found, so the rate pills can't be shown");
+  // At the top of the Quicklinks panel while it's running (it sends idle-angler-quicklinks as it starts
+  // and stops), else in the top bar right of the Emberscales. Moving a node restarts its CSS animation,
+  // so the countdown bars are set back to the time already measured.
+  const placePills = () => {
+    const host = document.getElementById('qs-pills');
+    if (host ? wrap.parentElement === host : !ember || (wrap.parentElement && wrap.previousElementSibling === ember)) return;
+    wrap.style.minWidth = ''; // the top bar fixes' ratchet: it measures again there
+    if (host) host.append(wrap);
+    else ember.after(wrap);
+    const done = performance.now() - last.t;
+    for (const bar of wrap.querySelectorAll('.measured-countdown')) bar.style.animationDelay = `-${Math.round(done)}ms`;
+  };
+  if (!ember) console.warn('[gold/s] Emberscales counter not found: the rate pills show only in Quicklinks');
 
   // Icons: the game's chest sprite, and a Carp (index 57) cut from the fish sprite sheet. Carp is
   // chunky and orange, so it stays readable at pill size where slimmer fish turn into a line.
@@ -961,7 +978,9 @@ const incomePills = async () => {
   const minusBtn = stepBtn('−', -1);
   const plusBtn = stepBtn('+', 1);
   autoWrap.append(autoBtn, minusBtn, plusBtn);
-  wrap.after(autoWrap);
+  ember?.after(autoWrap); // auto-click stays in the top bar, wherever the pills are
+  placePills();
+  addEventListener('idle-angler-quicklinks', placePills);
   attachTip(autoBtn);
 
   const clickCanvas = () => {
@@ -1129,6 +1148,7 @@ const incomePills = async () => {
     beat?.stop();
     autoWrap.remove();
     document.removeEventListener('visibilitychange', onVis);
+    removeEventListener('idle-angler-quicklinks', placePills);
     wrap.remove();
     tip.remove();
     style.remove();
@@ -2031,6 +2051,7 @@ const weatherForecast = async () => {
 // It adds a tab on the right edge of the page; click it to slide out a panel with what most needs you
 // right now. While the panel is out, the game shrinks to make room beside it (nothing is covered);
 // click the tab again to put it away. The panel shows:
+//  - Per second: the income pills (that mod puts them here while both run); Open opens the Min-maxer
 //  - Character: your saved gear sets; click one to put it on, ⟳ saves what you're wearing over it,
 //    ✕ deletes it, and "+ Save what you're wearing" adds a new one (as in Angler > Character)
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
@@ -2067,8 +2088,8 @@ const summaryPanel = async () => {
   const SLIDE_MS = 180;
   // The panel's width: wide enough for each bounty's name on one line, between these (and never more
   // than half the window, or 85% of a narrow one). A name too long even then ends in "…" (hover for it).
-  const MIN_W = 480;
-  const MAX_W = 600;
+  const MIN_W = 520;
+  const MAX_W = 640;
 
   // ---------- The game's own helpers (copies from ui.js: it doesn't export them) ----------
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -2284,6 +2305,7 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel .qs-chests{display:flex;align-items:center;gap:8px}
 #summary-panel .qs-chests .row-main{flex:1}
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
+#qs-pills:has(#measured-rate-wrap) .qs-pills-off{display:none}
 #summary-tab{position:fixed;top:calc(50% - 70px);right:0;z-index:5;transform:translateY(-100%);display:flex;flex-direction:column;align-items:center;gap:6px;
   min-width:0;padding:10px 0;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out;
   /* As wide as the game's side tabs to the next water (.sail-tab: 44px, zoomed by the text size) */
@@ -2309,6 +2331,8 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
 
   // ---------- The panel and its tab ----------
   const SECTIONS = [
+    // No html: the income pills mod moves its pills into #qs-pills (it listens for idle-angler-quicklinks)
+    { id: 'stats', title: 'Per second', panel: 'minmax', html: null },
     { id: 'character', title: 'Character', panel: 'character', html: gearSetsHtml, count: () => `${(S.state.gearSets ?? []).length}/${GEAR_SETS.max} gear sets` },
     { id: 'bounties', title: 'Bounties', panel: 'bounties', html: bountiesHtml, count: () => { const n = finishedBounties(); return n ? `${n} to claim` : ''; } },
     { id: 'ascend', title: 'Ascend', panel: 'ascend', html: ascendHtml },
@@ -2322,8 +2346,13 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   panel.innerHTML = `<div class="qs-body">${SECTIONS.map(
     (s) => `<section data-qs="${s.id}"><h3>${esc(s.title)} <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
   ).join('')}</div>`;
+  const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
+  pillsHost.id = 'qs-pills';
+  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them here.</p>';
+  panel.querySelector('[data-qs="stats"] .goto').title = 'Open the Min-maxer';
   layer.append(panel);
-  const parts = SECTIONS.map((s) => {
+  dispatchEvent(new Event('idle-angler-quicklinks'));
+  const parts = SECTIONS.filter((s) => s.html).map((s) => {
     const el = panel.querySelector(`[data-qs="${s.id}"]`);
     return { ...s, content: el.querySelector('.qs-content'), countEl: el.querySelector('.qs-count'), last: null, lastCount: null };
   });
@@ -2419,7 +2448,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     document.body.classList.toggle('qs-open', open);
     tab.setAttribute('aria-expanded', String(open));
     tab.setAttribute('aria-label', open ? 'Hide Quicklinks' : 'Show Quicklinks');
-    tab.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: gear sets, bounties, ascending, Foreman, chests and gear upgrades';
+    tab.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, gear sets, bounties, ascending, Foreman, chests and gear upgrades';
     panel.inert = !open;
     if (remember) {
       try {
@@ -2451,6 +2480,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     document.body.classList.remove('qs-open');
     document.documentElement.style.removeProperty('--qs-w');
     panel.remove();
+    dispatchEvent(new Event('idle-angler-quicklinks')); // the pills go back to the top bar
     tab.remove();
     style.remove();
     dispatchEvent(new Event('resize'));
@@ -2485,7 +2515,7 @@ const MODS = [
   {
     id: 'incomePills',
     name: "Income pills and auto-click",
-    desc: "Gold, fish, chests and XP a second, measured each minute, in the top bar, and an Auto-click toggle (1-15 clicks a second) that starts on",
+    desc: "Gold, fish, chests and XP a second, measured each minute, at the top of Quicklinks (or in the top bar without it), and an Auto-click toggle (1-15 clicks a second) that starts on",
     start: incomePills,
     stop: 'stopGoldLogger',
     // Shown under the mod's row; each is a localStorage key the mod reads as it starts
@@ -2516,7 +2546,7 @@ const MODS = [
   {
     id: 'summaryPanel',
     name: "Quicklinks",
-    desc: "A tab on the right edge that slides out your gear sets, bounties, ascending, the Foreman, chests and the upgrades in your bag",
+    desc: "A tab on the right edge that slides out your income a second, gear sets, bounties, ascending, the Foreman, chests and the upgrades in your bag",
     start: summaryPanel,
     stop: 'stopSummaryPanel',
   },
