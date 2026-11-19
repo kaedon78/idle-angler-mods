@@ -2052,8 +2052,8 @@ const weatherForecast = async () => {
 // It adds a tab on the right edge of the page; click it to slide out a panel with what most needs you
 // right now. While the panel is out, the game shrinks to make room beside it (nothing is covered);
 // click the tab again to put it away. The panel shows:
-//  - Per second: the income pills and Auto-click (that mod puts them here while both run); Open opens
-//    the Min-maxer
+//  - Per second: the income pills and Auto-click (that mod puts them here while both run), and between
+//    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
 //  - Character: your saved gear sets; click one to put it on, ⟳ saves what you're wearing over it,
 //    ✕ deletes it, and "+ Save what you're wearing" adds a new one (as in Angler > Character)
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
@@ -2073,7 +2073,8 @@ const summaryPanel = async () => {
   const mod = (path) => import(new URL(path, location.origin).href);
   const S = await mod('/src/state.js');
   const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS } = await mod('/src/data.js');
-  const { fmt, fmtHtml, moneyHtml, hex } = await mod('/src/format.js');
+  const { fmt, fmtHtml, fmtDecHtml, moneyHtml, hex } = await mod('/src/format.js');
+  const { GAIN_STATS, tenPercentPoints } = await mod('/src/minmax.js');
   const { describeBounty, bountyProgress, rewardTier } = await mod('/src/bounties.js');
   const { ICON_COLS, ICON_ROWS, ICON_INDEX } = await mod('/src/icon-index.js');
 
@@ -2217,6 +2218,35 @@ const summaryPanel = async () => {
       <p class="muted small-text">${listed ? `${listed} upgrade${listed === 1 ? '' : 's'} on its list` : 'Its list is empty: nothing is bought'} · <button class="goto" data-action="goto" data-panel="automation">Change the list <span class="goto-arrow">→</span></button></p>`;
   }
 
+  // ---------- The best +10% (the Min-maxer's Gains tab, minmax-ui.js renderGains) ----------
+  // The same sum: each stat 10% higher than you have it, through the game's own goldPerSecond at your
+  // clicks a second here, against what you make now. Worked out again every 5 s, or when the zone, clicking
+  // or the main stats change (as the game does).
+  const GAINS_SHOWN = 3;
+  let gainsCache = { at: 0, key: '', rows: [] };
+  function gainsHtml() {
+    const stats = S.getStats();
+    const zone = S.currentZone();
+    const c = S.clickRate();
+    const key = `${zone.id}|${c.toFixed(1)}|${stats.valueMult}|${stats.luckMult}|${stats.multiCatch}`;
+    if (Date.now() - gainsCache.at > 5000 || gainsCache.key !== key) {
+      const base = S.goldPerSecond(stats, zone, c);
+      const rows = GAIN_STATS.map((stat) => {
+        const points = tenPercentPoints(stats, stat);
+        const with10 = S.goldPerSecond(S.statsWithBonus(stat, points), zone, c);
+        return { stat, points, gain: base > 0 ? with10 / base - 1 : 0 };
+      }).sort((a, b) => b.gain - a.gain);
+      gainsCache = { at: Date.now(), key, rows };
+    }
+    const top = gainsCache.rows.filter((r) => r.gain >= 0.0005).slice(0, GAINS_SHOWN); // the Min-maxer's "no effect" line
+    if (!top.length) return '<p class="muted small-text">No stat raises your Gold here.</p>';
+    const best = top[0].gain;
+    const rows = top
+      .map(({ stat, points, gain }) => `<tr data-tip="stat:${stat}"><td>${esc(STATS[stat]?.name ?? stat)}</td><td class="muted">+${fmtDecHtml(points)} pts</td><td><b>+${(gain * 100).toFixed(2)}%</b></td><td><span class="mm-bar"><i style="width:${((gain / best) * 100).toFixed(1)}%"></i></span></td></tr>`)
+      .join('');
+    return `<table class="mm-table mm-gains"><tr><th>Best +10%</th><th>Bonus</th><th>Gold/s</th><th></th></tr>${rows}</table>`;
+  }
+
   // ---------- Chests ----------
   function chestsHtml() {
     const owned = Object.entries(S.state.chests ?? {})
@@ -2308,6 +2338,12 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel .qs-chests .row-main{flex:1}
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
 #qs-pills:has(#measured-rate-wrap) .qs-pills-off{display:none}
+/* Top to bottom: the pills, the best +10%, Auto-click (the pills mod appends its two; this orders them) */
+#qs-pills{display:flex;flex-direction:column}
+#qs-pills #measured-rate-wrap{order:1}
+#qs-pills .qs-gains{order:2;margin:2px 0}
+#qs-pills #measured-autoclick-wrap{order:3;align-self:flex-start}
+#summary-panel .mm-gains td:nth-child(4){width:35%}
 #summary-tab{position:fixed;top:calc(50% - 70px);right:0;z-index:5;transform:translateY(-100%);display:flex;flex-direction:column;align-items:center;gap:6px;
   min-width:0;padding:10px 0;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out;
   /* As wide as the game's side tabs to the next water (.sail-tab: 44px, zoomed by the text size) */
@@ -2333,8 +2369,9 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
 
   // ---------- The panel and its tab ----------
   const SECTIONS = [
-    // No html: the income pills mod moves its pills into #qs-pills (it listens for idle-angler-quicklinks)
-    { id: 'stats', title: 'Per second', panel: 'minmax', html: null },
+    // The income pills mod moves its pills and Auto-click into #qs-pills (it listens for idle-angler-quicklinks);
+    // this section draws only the best +10% (.qs-gains), which CSS orders between them
+    { id: 'stats', title: 'Per second', panel: 'minmax', html: gainsHtml },
     { id: 'character', title: 'Character', panel: 'character', html: gearSetsHtml, count: () => `${(S.state.gearSets ?? []).length}/${GEAR_SETS.max} gear sets` },
     { id: 'bounties', title: 'Bounties', panel: 'bounties', html: bountiesHtml, count: () => { const n = finishedBounties(); return n ? `${n} to claim` : ''; } },
     { id: 'ascend', title: 'Ascend', panel: 'ascend', html: ascendHtml },
@@ -2350,13 +2387,13 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   ).join('')}</div>`;
   const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
   pillsHost.id = 'qs-pills';
-  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them and Auto-click here.</p>';
+  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them and Auto-click here.</p><div class="qs-gains"></div>';
   panel.querySelector('[data-qs="stats"] .goto').title = 'Open the Min-maxer';
   layer.append(panel);
   dispatchEvent(new Event('idle-angler-quicklinks'));
-  const parts = SECTIONS.filter((s) => s.html).map((s) => {
+  const parts = SECTIONS.map((s) => {
     const el = panel.querySelector(`[data-qs="${s.id}"]`);
-    return { ...s, content: el.querySelector('.qs-content'), countEl: el.querySelector('.qs-count'), last: null, lastCount: null };
+    return { ...s, content: el.querySelector('.qs-gains') ?? el.querySelector('.qs-content'), countEl: el.querySelector('.qs-count'), last: null, lastCount: null };
   });
 
   const tab = document.createElement('button');
@@ -2450,7 +2487,7 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     document.body.classList.toggle('qs-open', open);
     tab.setAttribute('aria-expanded', String(open));
     tab.setAttribute('aria-label', open ? 'Hide Quicklinks' : 'Show Quicklinks');
-    tab.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, gear sets, bounties, ascending, Foreman, chests and gear upgrades';
+    tab.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, the best +10%, gear sets, bounties, ascending, Foreman, chests and gear upgrades';
     panel.inert = !open;
     if (remember) {
       try {
