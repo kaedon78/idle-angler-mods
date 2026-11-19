@@ -19,7 +19,7 @@ window.stopIdleAnglerMods?.(); // replace the mods already running
 // =====================================================================================================
 // Zone map strip (was zone-map.js)
 //
-// It adds a thin strip across the screen under the top bar, laid out like the game's world, left to
+// It adds a 60px strip across the screen under the top bar, in its colours, laid out like the game's world, left to
 // right: the Basement and the Cabin, then every water from the Pond to the Cosmic Void, each cell
 // showing a small copy of that place's scenery. (The Town and the Farm are left out while the game
 // has them shelved.)
@@ -34,8 +34,9 @@ window.stopIdleAnglerMods?.(); // replace the mods already running
 // level (Lv 1-99, as in the Collection).
 // Click a cell to go there: a water sails there (the game's own travel action, as Boat & Map's "Sail
 // here"); the Basement and the Cabin walk you in with the game's own fade, from wherever you are
-// (sailing back to the Pond first if needed). A locked water opens Boat & Map instead, so buying a
-// boat stays the game's own button. A shut Basement does nothing until you have the ascensions;
+// (sailing back to the Pond first if needed). A water whose boat you can afford buys the boat and sails
+// there (the game's own unlockZone, as its line map does); any other locked water opens Boat & Map,
+// which says what it needs. A shut Basement does nothing until you have the ascensions;
 // then it walks you into the Cabin, which is what opens its door.
 // Stop it (and remove the strip) with:  stopZoneMap(), or untick it in Settings > Mods
 // =====================================================================================================
@@ -48,7 +49,7 @@ const zoneMap = async () => {
   const { worldAt, conditionName } = await mod('/src/world.js');
   const { FishingScene } = await mod('/src/scene.js');
   const { Homestead } = await mod('/src/homestead.js');
-  const { openWindow } = await mod('/src/ui.js');
+  const { openWindow, toast } = await mod('/src/ui.js');
   const { describeBounty, bountyProgress } = await mod('/src/bounties.js');
   // Species mastery levels (1-99). A newer module, so the strip still works without it (no "Lv" then)
   const { masteryLevel } = await mod('/src/mastery.js').catch(() => ({}));
@@ -115,8 +116,9 @@ const zoneMap = async () => {
   const style = document.createElement('style');
   style.id = 'zonemap-style';
   style.textContent = `
-#zonemap{position:absolute;z-index:6;left:6px;right:6px;
-  display:flex;gap:2px;height:var(--zm-h,30px);font-family:var(--font);font-size:clamp(12px,calc(var(--zm-h,30px) * .34),16px);line-height:1;color:var(--text);
+#zonemap{position:absolute;z-index:6;left:0;right:0;box-sizing:border-box;padding:4px 6px;
+  display:flex;gap:2px;height:var(--zm-h,60px);font-family:var(--font);font-size:16px;line-height:1;color:var(--text);
+  background:linear-gradient(rgba(14,10,10,.9),rgba(14,10,10,.72)); /* the top bar's own (#topbar::before) */
   pointer-events:none;user-select:none}
 #zonemap .zm{position:relative;flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center;gap:5px;
   padding:0 6px;overflow:hidden;white-space:nowrap;pointer-events:auto;cursor:pointer;isolation:isolate;
@@ -136,8 +138,8 @@ const zoneMap = async () => {
 #zonemap .zm .pill{flex:none;padding:2px 5px;font-weight:700;background:rgba(0,0,0,.65);box-shadow:0 0 0 1px rgba(0,0,0,.4)}
 #zonemap .zm .boat{position:absolute;bottom:1px;width:0;height:0;margin-left:-4px;border:4px solid transparent;
   border-bottom:5px solid #fde68a;border-top:0;transition:left 1s linear;filter:drop-shadow(0 0 1px #000)}
-#scene-hud > .hud-where{margin-top:calc(var(--topbar-h) * var(--ui-scale) + var(--zm-h,30px) + 4px)}
-#conn-status:not(.replaced, .kicked){top:calc(var(--topbar-h) * var(--ui-scale) + var(--zm-h,30px) + 14px)}
+#scene-hud > .hud-where{margin-top:calc(var(--topbar-h) * var(--ui-scale) + var(--zm-h,60px) + 4px)}
+#conn-status:not(.replaced, .kicked){top:calc(var(--topbar-h) * var(--ui-scale) + var(--zm-h,60px) + 14px)}
 #zonemap-tip .zm-fish{display:grid;grid-template-columns:auto auto 1fr;column-gap:10px;align-items:baseline}
 #zonemap-tip .zm-stars{color:#fde047;letter-spacing:1px}
 @media (max-width:1000px){#zonemap .zm .sub{display:none}}
@@ -147,14 +149,15 @@ const zoneMap = async () => {
   const strip = document.createElement('div');
   strip.id = 'zonemap';
   app.append(strip);
-  // Just under the top bar and as tall as it, wherever the game's layout and UI scale put it. The
-  // height goes in --zm-h on the page, which also pushes the game's place label and connection notice
-  // down below the strip.
+  // Right under the top bar, wherever the game's layout and UI scale put it, in the top bar's colours so
+  // the two read as one band. HEIGHT goes in --zm-h on the page, which also pushes the game's place label
+  // and connection notice down below the strip.
+  const HEIGHT = 60;
   const root = document.documentElement;
   const place = () => {
     const a = app.getBoundingClientRect(), t = topbar.getBoundingClientRect();
-    strip.style.top = `${t.bottom - a.top + 2}px`;
-    const h = `${Math.round(t.height) || 30}px`;
+    strip.style.top = `${t.bottom - a.top}px`;
+    const h = `${HEIGHT}px`;
     if (root.style.getPropertyValue('--zm-h') !== h) root.style.setProperty('--zm-h', h);
   };
 
@@ -297,7 +300,7 @@ const zoneMap = async () => {
       // Overhead, the cabin's floorboards seen from below; damp planks, a fieldstone footing, a dirt floor
       for (let y = 0, i = 0; y < ceiling; y += 4 * PX, i++) { g.fillStyle = rgb(i % 2 ? 0x241510 : 0x2b1a12); g.fillRect(0, y, VW, 4 * PX); }
       const wall = await img('/assets/cabin/qc-wall.png');
-      if (wall) band(g, recolor(crop(wall, 16, 16, 96, 96), 0x6e5a54, 'multiply'), ceiling, { repeat: 'repeat', rows: (footing - ceiling) / PX });
+      if (wall) band(g, recolor(crop(wall, 16, 16, 96, 96), 0x9a8078, 'multiply'), ceiling, { repeat: 'repeat', rows: (footing - ceiling) / PX });
       else { g.fillStyle = rgb(0x2a1c18); g.fillRect(0, ceiling, VW, footing - ceiling); }
       g.fillStyle = rgb(0x1c1916);
       g.fillRect(0, footing, VW, GROUND - footing);
@@ -315,13 +318,14 @@ const zoneMap = async () => {
       const cx = VW / 2, cy = GROUND - 30 * PX;
       const crystal = await img('/assets/cabin/crystal-dark.png');
       if (crystal) sprite(g, crystal, cx - 16 * PX, GROUND, [0, 0, 32, 32]); // the first frame of its glint
-      const dark = g.createRadialGradient(cx, cy, 30 * PX, cx, cy, 420 * PX);
+      // (Lighter than the game's darkness, so the room still reads at the strip's size)
+      const dark = g.createRadialGradient(cx, cy, 60 * PX, cx, cy, 520 * PX);
       dark.addColorStop(0, 'rgba(8,4,10,0)');
-      dark.addColorStop(1, 'rgba(8,4,10,.85)');
+      dark.addColorStop(1, 'rgba(8,4,10,.45)');
       g.fillStyle = dark;
       g.fillRect(0, 0, VW, VH);
-      const glow = g.createRadialGradient(cx, cy, 0, cx, cy, 90 * PX);
-      glow.addColorStop(0, 'rgba(217,70,239,.45)');
+      const glow = g.createRadialGradient(cx, cy, 0, cx, cy, 120 * PX);
+      glow.addColorStop(0, 'rgba(217,70,239,.55)');
       glow.addColorStop(1, 'rgba(124,58,237,0)');
       g.fillStyle = glow;
       g.fillRect(0, 0, VW, VH);
@@ -509,7 +513,13 @@ const zoneMap = async () => {
         rows.push(`<span style="color:${tierColor(f.tier)}">${esc(f.name)}${when}</span>${stars(masteryOf(n))}${level}`);
       }
       rows.push('</div>');
-      const hint = here ? 'You are fishing here.' : status === 'unlocked' ? 'Click to sail here.' : 'Click to open Boat & Map.';
+      const hint = here
+        ? 'You are fishing here.'
+        : status === 'unlocked'
+          ? 'Click to sail here.'
+          : status === 'buyable' && st.gold >= zone.unlockCost
+            ? `Click to buy the boat for ${esc(money(zone.unlockCost))} and sail here.`
+            : 'Click to open Boat &amp; Map.';
       rows.push(`<div class="tip-sep"></div><div class="muted">${hint}</div>`);
       tips.set(el, `<div class="tip-title" style="color:${tierColor(zone.maxTier)}">${zone.index + 1}. ${esc(zone.name)}</div>${rows.join('')}`);
     });
@@ -527,19 +537,29 @@ const zoneMap = async () => {
   const goZone = async (zone) => {
     const status = S.zoneStatus(zone);
     if (status === 'hidden') return;
-    if (status !== 'unlocked') return openWindow('zones'); // Boat & Map: buying stays the game's button
+    // A boat you can afford is bought on the click, as the game's own line map does (ui.js): unlockZone
+    // takes the gold and sails you there. Anything else locked opens Boat & Map, which says what it needs.
+    const buy = status === 'buyable' && S.state.gold >= zone.unlockCost;
+    if (status !== 'unlocked' && !buy) return openWindow('zones');
+    const go = async () => {
+      if (buy) {
+        if (await act(S.game, 'unlockZone', { id: zone.id })) toast(`Bought a ${BOATS[zone.index]?.name ?? 'boat'}! Sailing to ${zone.name}.`);
+        else console.warn(`[zone map] Couldn't buy the boat for ${zone.id}`);
+        render();
+      } else if (S.state.zone !== zone.id) await travel(zone.id);
+    };
     const h = placeNow() !== 'dock' ? getHome() : null;
     if (h?.place) {
-      // Out of the homestead first (the game's fade), then sail on if it's not the Pond
+      // Out of the homestead first (the game's fade), then buy or sail
       if (h.busy) return;
       h.fadeTo(() => {
         h.leave();
-        if (S.state.zone !== zone.id) travel(zone.id);
+        go();
         render();
       });
       return;
     }
-    if (S.state.zone !== zone.id) await travel(zone.id);
+    await go();
   };
 
   const goLand = async (target) => {
