@@ -2205,16 +2205,21 @@ const summaryPanel = async () => {
 
   // ---------- The Foreman (as the Upgrades window's Automation tab draws it) ----------
   // Its next upgrade: state.js nextAutoUpgrade, which isn't exported. The first on its list that isn't maxed,
-  // or with "buy the next one I can afford", the first it can pay a level of now.
+  // or with "buy the next one I can afford", the first it can pay a level of now. When it can pay for none,
+  // the one it buys first as gold comes in: the cheapest level (the earlier on the list on a tie).
   function foremanNext() {
     const set = S.state.settings;
     const discount = S.upgradeDiscount();
+    let cheapest = null;
     for (const id of set.autoUpgradeOrder ?? []) {
       const up = UPGRADE_BY_ID[id];
       if (!up || S.upgradeLevel(id) >= up.maxLevel) continue;
-      if (!set.autoUpgradeNextAfforded || S.state.gold >= S.bulkCost(up, S.upgradeLevel(id), 1, discount)) return up;
+      if (!set.autoUpgradeNextAfforded) return up;
+      const cost = S.bulkCost(up, S.upgradeLevel(id), 1, discount);
+      if (S.state.gold >= cost) return up;
+      if (!cheapest || cost < cheapest.cost) cheapest = { up, cost };
     }
-    return null;
+    return cheapest?.up ?? null;
   }
   // The upgrade's row as the Upgrades window draws it (ui.js renderUpgrades, effectText, milestoneText), without
   // its fold button. Its buy button buys what the window's x1 / x10 / Max would.
@@ -2251,7 +2256,7 @@ const summaryPanel = async () => {
     const nextRow = up
       ? upgradeRowHtml(up)
       : listed
-        ? `<p class="muted small-text">${mode === 'next' ? 'Nothing on its list you can afford a level of yet' : 'Everything on its list is maxed'}</p>`
+        ? '<p class="muted small-text">Everything on its list is maxed</p>'
         : '';
     return `${nextRow}<label class="setting-select">Buying <select data-change="autoup-mode" aria-label="How Foreman buys upgrades">${[
       ['off', 'Off'],
