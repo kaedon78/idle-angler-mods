@@ -27,7 +27,8 @@
 //  - Lighter blurs. The fog and the lantern's three bloom layers are Pixi blur filters at quality 3 and 4:
 //    each quality step is one more pass across the screen in each direction, 30 passes a frame at
 //    night. Lighter blurs cap them at 2 passes: the same spread, slightly less smooth at the edges.
-//  - Meter: a small chip at the bottom left with the frames a second and the cap. Click it for the settings
+//  - Meter: a small chip right of the game's "online" player count with the frames a second and the cap
+//    (in the window's bottom left corner until the game shows that count). Click it for the settings
 //    and which renderer the game ended up on: "Microsoft Basic Render Driver" (Windows), "SwiftShader" or
 //    "llvmpipe" in its name means the graphics are drawn by the CPU; "canvas" means the browser had no WebGL
 //    at all, and Pixi drew with plain canvas. When the CPU draws, nearly all the cost is in the browser's
@@ -133,12 +134,15 @@
   // ---------- Meter and settings ----------
   const css = document.createElement('style');
   css.textContent = `
-    #iap-perf { position: fixed; left: 8px; bottom: 8px; z-index: 2147483000; font: 12px/1.35 system-ui, sans-serif;
-      color: #e8eedd; user-select: none; }
-    #iap-perf .chip { display: inline-block; padding: 3px 8px; border-radius: 6px; background: rgba(10, 14, 8, 0.78);
-      border: 1px solid rgba(207, 224, 168, 0.25); cursor: pointer; font-variant-numeric: tabular-nums; }
-    #iap-perf .panel { display: none; margin-bottom: 6px; padding: 8px 10px; width: 250px; border-radius: 8px;
-      background: rgba(10, 14, 8, 0.92); border: 1px solid rgba(207, 224, 168, 0.25); }
+    #iap-perf { position: fixed; left: 8px; bottom: 8px; z-index: 2147483000; color: #e9dcbc; user-select: none; }
+    #iap-perf.docked { position: absolute; }
+    /* the chip copies the game's "online" chip (.online-count) it sits beside */
+    #iap-perf .chip { display: inline-block; padding: 3px 8px; font-size: 13px; white-space: nowrap; cursor: pointer;
+      background: rgba(10, 14, 8, 0.72); border: 2px solid rgba(207, 224, 168, 0.35);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45); font-variant-numeric: tabular-nums; }
+    #iap-perf .panel { display: none; margin-bottom: 6px; padding: 8px 10px; width: 250px; font: 12px/1.35 system-ui, sans-serif;
+      color: #e8eedd; background: rgba(10, 14, 8, 0.92); border: 2px solid rgba(207, 224, 168, 0.35); }
+    @media (max-width: 640px) { #iap-perf .chip { padding: 2px 6px; font-size: 11px; } }
     #iap-perf.open .panel { display: block; }
     #iap-perf .panel h4 { margin: 0 0 6px; font-size: 12px; }
     #iap-perf label { display: flex; align-items: center; gap: 6px; margin: 4px 0; cursor: pointer; }
@@ -180,6 +184,34 @@
   // keep keys typed in the panel away from the game's shortcuts
   box.addEventListener('keydown', (e) => e.stopPropagation());
 
+  // Docked just right of the game's "online" chip (#online-count, absolute at the stage's bottom left, beside
+  // the chat button; on phones it moves up onto the chat button, and this follows). The game hides that chip
+  // until it's connected: the bottom left corner of the window until then.
+  const GAP = 6;
+  const place = () => {
+    const online = document.getElementById('online-count');
+    if (!online || online.hidden || !online.offsetParent) {
+      box.classList.remove('docked');
+      box.style.left = box.style.bottom = '';
+      if (box.parentElement !== document.body) document.body.appendChild(box);
+      return;
+    }
+    if (box.previousElementSibling !== online) online.after(box);
+    box.classList.add('docked');
+    const bottom = parseFloat(getComputedStyle(online).bottom) || 0;
+    box.style.left = `${online.offsetLeft + online.offsetWidth + GAP}px`;
+    box.style.bottom = `${bottom + (online.offsetHeight - chip.offsetHeight) / 2}px`;
+  };
+  const placeObserver = new ResizeObserver(place); // the count's width changes as players come and go
+  const watchOnline = () => {
+    const online = document.getElementById('online-count');
+    if (online && !online.dataset.iapWatched) {
+      online.dataset.iapWatched = '1';
+      placeObserver.observe(online);
+    }
+  };
+  addEventListener('resize', place);
+
   const render = () => {
     const now = performance.now();
     const span = now - stats.since;
@@ -199,6 +231,8 @@
       box.querySelector('[data-renderer]').textContent =
         `Renderer: ${rendererName()}${app && softwareGl() ? ' — drawn by the CPU' : ''}.`;
     }
+    watchOnline();
+    place();
   };
   const meterTimer = setInterval(render, 1000);
   render();
@@ -215,6 +249,9 @@
     Ticker.prototype.update = baseUpdate;
     BlurFilter.prototype.apply = baseBlurApply;
     clearInterval(meterTimer);
+    placeObserver.disconnect();
+    removeEventListener('resize', place);
+    delete document.getElementById('online-count')?.dataset.iapWatched;
     restoreBlur();
     box.remove();
     css.remove();
