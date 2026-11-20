@@ -14,7 +14,6 @@
 // is running. It starts every mod you've left on, and adds a Mods tab to the game's Settings window
 // (Esc) where each one can be turned on or off. That takes effect at once and is remembered in this
 // browser for the next time the script runs. The mods:
-//  - Top bar layout fixes (always on): the game's own top bar stays put (test report #28 and #29)
 //  - Zone map strip: every place in the world under the top bar; click one to go there
 //  - Income pills and auto-click: measured gold, fish, chests and XP a second; Auto-click 1-15/s
 //  - Build switcher: put on a saved gear set from the bottom bar, or press 1-5
@@ -26,69 +25,6 @@
 
 (async () => {
 window.stopIdleAnglerMods?.(); // replace the mods already running
-
-// =====================================================================================================
-// Top bar layout fixes
-//
-// Two bugs in the game's own stylesheet, patched until the game fixes them (test report #28, #29):
-//  - #topbar .store-btn has margin-left: auto, which pushes the Supporter store button and the avatar
-//    to the far right of the bar: it's set back to 0
-//  - the currency buttons are as wide as their text, so whenever the gold or its rate changes length
-//    ("9g 87s" to "10g", "9,999g 99s" to "10.00Kg") the rest of the bar shifts. Each one keeps the
-//    widest it has been as its min-width, so it can grow but never shrinks back and moves nothing. A new
-//    text size starts them over.
-// Always on (not listed in Settings > Mods). Stop it from the console with:  stopTopbarFixes()
-// =====================================================================================================
-const topbarFixes = async () => {
-  window.stopTopbarFixes?.(); // replace one already running
-
-  const topbar = document.getElementById('topbar');
-  const currencies = topbar?.querySelector('.currencies');
-  if (!currencies) return console.warn('[top bar fixes] The game page was not found (#topbar .currencies)');
-
-  const style = document.createElement('style');
-  style.id = 'tbf-style';
-  style.textContent = `
-#topbar .store-btn{margin-left:0}
-#topbar .currency{box-sizing:border-box;justify-content:flex-start}`;
-  document.head.append(style);
-
-  // The top bar has zoom: var(--ui-scale) (the text size setting). getBoundingClientRect is in screen
-  // pixels after that zoom and min-width in CSS pixels before it, so the width is divided by the zoom.
-  let zoomWas = null;
-  const widest = new Map(); // currency button -> its widest width so far (CSS px)
-  const hold = () => {
-    const zoom = currencies.currentCSSZoom ?? 1;
-    if (zoom !== zoomWas) {
-      zoomWas = zoom;
-      widest.clear();
-      for (const el of currencies.querySelectorAll('.currency')) el.style.minWidth = '';
-    }
-    for (const el of currencies.querySelectorAll('.currency')) {
-      if (el.hidden) continue;
-      const w = Math.ceil(el.getBoundingClientRect().width / zoom);
-      if (w > (widest.get(el) ?? 0)) {
-        widest.set(el, w);
-        el.style.minWidth = `${w}px`;
-      }
-    }
-  };
-  // A mutation callback runs after the game changes the text and before the frame is drawn, so a button
-  // that grew is held at its new width before anything on its right can be seen moving back
-  const observer = new MutationObserver(hold);
-  observer.observe(currencies, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden'] });
-  const onResize = () => { zoomWas = null; hold(); };
-  addEventListener('resize', onResize);
-  hold();
-
-  window.stopTopbarFixes = () => {
-    observer.disconnect();
-    removeEventListener('resize', onResize);
-    for (const el of currencies.querySelectorAll('.currency')) el.style.minWidth = '';
-    style.remove();
-    delete window.stopTopbarFixes;
-  };
-};
 
 // =====================================================================================================
 // Zone map strip (was zone-map.js)
@@ -829,7 +765,6 @@ const incomePills = async () => {
   const placePills = () => {
     const host = document.getElementById('qs-pills');
     if (host ? wrap.parentElement === host : !ember || (wrap.parentElement && wrap.previousElementSibling === ember)) return;
-    wrap.style.minWidth = autoWrap.style.minWidth = ''; // the top bar fixes' ratchet: it measures again there
     if (host) host.append(wrap, autoWrap);
     else ember.after(wrap, autoWrap);
     const done = performance.now() - last.t;
@@ -2432,6 +2367,7 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #qs-pills .qs-gains{order:2;margin:2px 0}
 #qs-pills #measured-autoclick-wrap{order:3;align-self:flex-start}
 #summary-panel .mm-gains td:nth-child(4){width:35%}
+/* top: its bottom edge (it hangs up from it); placeTab sets it above the game's sidebar toolbar */
 #summary-tab{position:fixed;top:calc(50% - 70px);right:0;z-index:5;transform:translateY(-100%);display:flex;flex-direction:column;align-items:center;gap:6px;
   min-width:0;padding:10px 0;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out;
   /* As wide as the game's side tabs to the next water (.sail-tab: 44px, zoomed by the text size) */
@@ -2623,6 +2559,27 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     relayout();
   }
   tab.addEventListener('click', () => setOpen(!isOpen));
+
+  // Since the game's UI update its toolbar (#hotbar) is a slim strip down the right edge, hanging above the
+  // waterline, so the tab sits 10px above it (its top moves with the water and the number of buttons). It
+  // never goes up into the top bar or the zone map strip. Where the toolbar isn't that strip (other screen
+  // sizes, older layouts), the tab stays where the CSS puts it.
+  function placeTab() {
+    const bar = document.getElementById('hotbar');
+    const r = bar?.getBoundingClientRect();
+    const right = app.getBoundingClientRect().right; // the game's right edge (the panel takes room beside it)
+    if (!r?.height || r.width > 200 || right - r.right > 60) {
+      if (tab.style.top) tab.style.top = '';
+      return;
+    }
+    const roof = Math.max(...['topbar', 'zonemap'].map((id) => document.getElementById(id)?.getBoundingClientRect().bottom ?? 0)) + 8;
+    const top = `${Math.round(Math.max(roof + tab.offsetHeight, r.top - 10))}px`; // its bottom edge: it hangs up from there
+    if (tab.style.top !== top) tab.style.top = top;
+  }
+  const tabTimer = setInterval(placeTab, 500);
+  addEventListener('resize', placeTab);
+  placeTab();
+
   let startOpen = false;
   try {
     startOpen = localStorage.getItem(STORE_KEY) === '1';
@@ -2640,6 +2597,8 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     removeEventListener('pointerup', onRelease);
     removeEventListener('pointercancel', onRelease);
     panel.removeEventListener('click', onFold);
+    clearInterval(tabTimer);
+    removeEventListener('resize', placeTab);
     document.body.classList.remove('qs-open');
     document.documentElement.style.removeProperty('--qs-w');
     panel.remove();
@@ -2660,14 +2619,6 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
 // Settings window on screen, and added back each time the game redraws it. While it's showing, the
 // game's own contents are hidden, not removed: a click on one of the game's tabs brings them back.
 const MODS = [
-  {
-    id: 'topbarFixes',
-    name: "Top bar layout fixes",
-    desc: "Until the game fixes test report #28 and #29: the Supporter store button stays beside the rest of the top bar, and the currencies keep their widest width so the bar doesn't shift as your gold changes",
-    start: topbarFixes,
-    stop: 'stopTopbarFixes',
-    always: true, // a fix, not a feature: always on, and not listed in the Mods tab
-  },
   {
     id: 'zoneMap',
     name: "Zone map strip",
