@@ -930,12 +930,16 @@ const incomePills = async () => {
   addEventListener('idle-angler-quicklinks', placePills);
   attachTip(autoBtn);
 
+  // Where a click lands is where the game shows its "-0.25s": the middle of the part of the scene you see,
+  // where the rare catch announcements show (with Quicklinks or the Left-hand layout panel out, part of
+  // the scene is under it: see viewCentre; its share is a half while neither is out)
   const clickCanvas = () => {
     const c = document.querySelector('#game > canvas');
     const r = c?.getBoundingClientRect();
     if (!r?.width) return false;
+    const share = window.idleAnglerViewCentre?.share ?? 0.5;
     const init = {
-      clientX: r.left + r.width / 2, clientY: r.top + r.height * 0.45,
+      clientX: r.left + r.width * share, clientY: r.top + r.height * 0.45,
       pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, bubbles: false, cancelable: true,
     };
     c.dispatchEvent(new PointerEvent('pointerdown', { ...init, buttons: 1 }));
