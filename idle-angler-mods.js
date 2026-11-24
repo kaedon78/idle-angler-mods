@@ -25,6 +25,7 @@
 //  - Company online: a green dot by each company member online now, in the Company window
 //  - Smooth resizing: no light-blue frames while the game resizes (a window drag, a phone turned, Quicklinks)
 //  - Fog to the edge: in fog the haze covers the whole screen, not stopping a little behind your angler
+//  - Spots on time: a new fishing spot fades in when it appears, not seconds late on a device whose clock is behind
 // Pasting it again replaces the one running. Stop everything (and remove the Mods tab) with:
 //   stopIdleAnglerMods()
 // Each mod below is the script it used to be, unchanged; the manager at the bottom runs them.
@@ -4067,6 +4068,45 @@ const fogToEdge = async () => {
 };
 
 // =====================================================================================================
+// Spots on time
+//
+// A new fishing spot can count ("On a School of fish" under the timers, and the bonus) seconds before its
+// ring shows on the water. Why: the server stamps a spot with when it appeared and when it ends, by the
+// server's clock, but the ring's fade (scene.js drawSpots: in over 3 s from `at`, out over the last 8 s
+// before `until`) is worked out from this device's clock (Date.now). When that clock is behind the
+// server's, the ring stays invisible until it catches up, and only then starts its 3 s fade; the game
+// keeps the boat on the server's clock for this reason (state.js seaNow), but not the spots.
+// This draws the spots by the server's clock (world.js serverNow, which the game sets from the server's
+// time when it connects), so a new spot starts fading in as soon as it arrives. The fade itself is the
+// game's own. Nothing else changes, and nothing goes to the server.
+// Stop it with:  stopSpotsOnTime(), or untick it in Settings > Mods
+// =====================================================================================================
+const spotsOnTime = async () => {
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const { FishingScene } = await mod('/src/scene.js');
+  const { serverNow } = await mod('/src/world.js');
+
+  window.stopSpotsOnTime?.(); // replace one already running
+
+  const proto = FishingScene.prototype;
+  const original = proto.drawSpots;
+  const realNow = Date.now;
+  proto.drawSpots = function (...args) {
+    const ahead = serverNow() - realNow.call(Date); // how far the server's clock is ahead of this device's
+    if (!ahead) return original.apply(this, args);
+    // drawSpots reads the time once, from Date.now: for this call only, that's the server's time
+    Date.now = () => realNow.call(Date) + ahead;
+    try { return original.apply(this, args); } finally { Date.now = realNow; }
+  };
+
+  window.stopSpotsOnTime = () => {
+    if (proto.drawSpots !== original) proto.drawSpots = original;
+    delete window.stopSpotsOnTime;
+  };
+  console.log('[spots on time] On: fishing spots fade in by the server’s clock. Turn it off with stopSpotsOnTime()');
+};
+
+// =====================================================================================================
 // The manager: which mods run, and the Mods tab in the Settings window
 // =====================================================================================================
 // The game draws a window's tabs and contents itself (ui.js renderWindow) and replaces them whenever
@@ -4201,6 +4241,13 @@ const MODS = [
     desc: "In fog the haze covers the whole screen, instead of stopping a little behind your angler out on the water",
     start: fogToEdge,
     stop: 'stopFogToEdge',
+  },
+  {
+    id: 'spotsOnTime',
+    name: "Spots on time",
+    desc: "A new fishing spot fades in as soon as it appears, instead of seconds after the game already counts it when this device's clock is behind the server's",
+    start: spotsOnTime,
+    stop: 'stopSpotsOnTime',
   },
 ];
 const STORE_KEY = 'idle-angler-mods';
