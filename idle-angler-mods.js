@@ -15,10 +15,15 @@
 // (Esc) where each one can be turned on or off. That takes effect at once and is remembered in this
 // browser for the next time the script runs. The mods:
 //  - Zone map strip: every place in the world under the top bar; click one to go there
-//  - Income pills and auto-click: measured gold, fish, chests and XP a second; Auto-click 1-15/s
-//  - Build switcher: put on a saved gear set from the bottom bar, or press 1-5
+//  - Income pills and auto-click: measured gold, fish, chests and XP a minute; Auto-click 1-15/s (in Settings > Mods)
+//  - Build switcher: press 1-5 to put on a saved gear set
 //  - Weather forecast: click the time and weather in the top bar, or press W
-//  - Quicklinks: a tab on the right edge with what most needs you right now
+//  - Gear judge: ▲ / ▼ on gear judged over a whole day of weather (or the time and weather you pick)
+//  - Quicklinks: a sidebar on the right edge, its panel with what most needs you right now
+//  - Left-hand layout: the sidebar on the left, windows sliding out from there, no pages in Upgrades and Perks
+//  - Stacked names: names on the water that would overlap stack in a column, by gold leaderboard rank, with rank badges
+//  - Company online: a green dot by each company member online now, in the Company window
+//  - Smooth resizing: no light-blue frames while the game resizes (a window drag, a phone turned, Quicklinks)
 // Pasting it again replaces the one running. Stop everything (and remove the Mods tab) with:
 //   stopIdleAnglerMods()
 // Each mod below is the script it used to be, unchanged; the manager at the bottom runs them.
@@ -621,10 +626,11 @@ const zoneMap = async () => {
 //
 // Every minute (or every 5, 15 or 30 s: "Measure over" in Settings > Mods) it measures, over that time,
 // the gold you actually earned, the fish you caught, the chests you found and the XP you gained, each
-// per second. They show as pills at the top of the Quicklinks panel while it's on, or else in the top bar
-// to the right of your Emberscales (styled like the game's own +X/s pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
-// in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle under them (or beside them in the
-// top bar) clicks the water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
+// per minute (as the game's own Gold / min at the top left, which is its estimate for idle fishing). They
+// show as pills at the top of the Quicklinks panel while it's on, or else in the top bar to the right of
+// your Emberscales (styled like the game's own +X/min pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
+// in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle in Settings > Mods (under
+// this mod) clicks the water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
 // stopGoldLogger()
 //
 // How it works: it samples counters the game only ever adds to:
@@ -725,10 +731,11 @@ const incomePills = async () => {
     // In the Quicklinks panel: the top bar's .currency and .rate rules (ui.css scopes them to #topbar)
     '#qs-pills #measured-rate-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;' +
     'font:600 17px var(--num);font-variant-numeric:lining-nums tabular-nums;text-shadow:1px 1px 0 #000}' +
-    '#qs-pills .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
+    // ...and Auto-click, in Settings > Mods (the manager puts it under this mod's row)
+    ':is(#qs-pills,#measured-autoclick-wrap) .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
     'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
-    '#qs-pills .rate .per{color:#8fbf6c}' +
-    '#qs-pills #measured-autoclick-wrap{margin:6px 0 4px;font:600 17px var(--num);text-shadow:1px 1px 0 #000}';
+    ':is(#qs-pills,#measured-autoclick-wrap) .rate .per{color:#8fbf6c}' +
+    '#measured-autoclick-wrap{font:600 17px var(--num);text-shadow:1px 1px 0 #000}';
   document.head.append(style);
   // Each bar runs for the period in use when it's made (it can change: setGoldLoggerPeriod)
   const countdownBar = () => {
@@ -758,15 +765,15 @@ const incomePills = async () => {
   const xpPill = makePill('measured-xp-rate');
   const pills = [goldPill, fishPill, chestPill, xpPill];
   wrap.append(...pills);
-  // The pills and the auto-click toggle (autoWrap, below): at the top of the Quicklinks panel while it's
-  // running (it sends idle-angler-quicklinks as it starts and stops), else in the top bar right of the
-  // Emberscales. Moving a node restarts its CSS animation, so the countdown bars are set back to the time
-  // already measured.
+  // The pills: at the top of the Quicklinks panel while it's running (it sends idle-angler-quicklinks as it
+  // starts and stops), else in the top bar right of the Emberscales. Moving a node restarts its CSS
+  // animation, so the countdown bars are set back to the time already measured. (The auto-click toggle,
+  // autoWrap below, lives in Settings > Mods.)
   const placePills = () => {
     const host = document.getElementById('qs-pills');
     if (host ? wrap.parentElement === host : !ember || (wrap.parentElement && wrap.previousElementSibling === ember)) return;
-    if (host) host.append(wrap, autoWrap);
-    else ember.after(wrap, autoWrap);
+    if (host) host.append(wrap);
+    else ember.after(wrap);
     const done = performance.now() - last.t;
     for (const bar of wrap.querySelectorAll('.measured-countdown')) bar.style.animationDelay = `-${Math.round(done)}ms`;
   };
@@ -776,7 +783,7 @@ const incomePills = async () => {
   // chunky and orange, so it stays readable at pill size where slimmer fish turn into a line.
   const chestImg = `<img src="${CHEST_ICON.url}" alt="chests" style="width:${CHEST_ICON.width}px;height:${CHEST_ICON.height}px;image-rendering:pixelated" />`;
   const fishImg = `<span aria-label="fish" style="display:inline-block;image-rendering:pixelated;${cellStyle(FISH_SHEET, 57, 22)}"></span>`;
-  const iconRate = (icon, n) => `${icon}<span><span class="num">${fmtRate(n)}</span><span class="per">/s</span></span>`;
+  const iconRate = (icon, n) => `${icon}<span><span class="num">${fmtRate(n)}</span><span class="per">/min</span></span>`; // n: a minute
 
   // ---------- Sampling ----------
   const tierOf = new Map(FISH.map((f) => [f.id, f.tier]));
@@ -813,52 +820,52 @@ const incomePills = async () => {
       (hiddenDuringWindow ? '<div class="muted">⚠ The tab was hidden for part of it, so this reads low (fishing pauses while hidden).</div>' : '');
 
     const goldPerSec = delta('copper') / secs;
-    goldPill.innerHTML = `+${moneyRateHtml(goldPerSec)}<span class="per">/s</span>`;
+    goldPill.innerHTML = `+${moneyRateHtml(goldPerSec * 60)}<span class="per">/min</span>`; // as the game draws its Gold / min (ui.js renderGoldRate)
     setTip(goldPill,
       `<div class="tip-title">Measured income</div>` +
-      `<div><b>${moneyRateHtml(goldPerSec)}</b> a second · <b>${moneyRateHtml(goldPerSec * 60)}</b> a minute</div>` +
+      `<div><b>${moneyRateHtml(goldPerSec * 60)}</b> a minute · <b>${moneyRateHtml(goldPerSec)}</b> a second</div>` +
       `<div class="muted">Everything you actually earned: fish, sales, chests, bounties, Golden Fish.</div>${footer}`);
 
     const fish = delta('fish');
     const casts = delta('casts');
     const fishPerSec = fish / secs;
-    fishPill.innerHTML = iconRate(fishImg, fishPerSec);
+    fishPill.innerHTML = iconRate(fishImg, fishPerSec * 60);
     const rows = RARITIES.map((r, t) => ({ r, n: Math.max(0, now.tiers[t] - last.tiers[t]) })).filter((x) => x.n > 0);
     const rowsTotal = rows.reduce((s, x) => s + x.n, 0);
     const cell = 'text-align:right;font-variant-numeric:tabular-nums';
     const table = rows.length
       ? `<div style="display:grid;grid-template-columns:auto repeat(4,auto);column-gap:14px;row-gap:1px;margin-top:4px">` +
-        `<span class="tip-head">Rarity</span><span class="tip-head" style="${cell}">Caught</span><span class="tip-head" style="${cell}">/s</span><span class="tip-head" style="${cell}">Share</span><span class="tip-head" style="${cell}">One every</span>` +
+        `<span class="tip-head">Rarity</span><span class="tip-head" style="${cell}">Caught</span><span class="tip-head" style="${cell}">/min</span><span class="tip-head" style="${cell}">Share</span><span class="tip-head" style="${cell}">One every</span>` +
         rows.map(({ r, n }) =>
           `<b style="color:${hex(r.color)}">${r.name}</b>` +
           `<span style="${cell}">${n.toLocaleString()}</span>` +
-          `<span style="${cell}">${fmtRate(n / secs)}</span>` +
+          `<span style="${cell}">${fmtRate((n / secs) * 60)}</span>` +
           `<span style="${cell}">${((n / rowsTotal) * 100).toFixed(n / rowsTotal < 0.1 ? 1 : 0)}%</span>` +
           `<span style="${cell}" class="muted">${fmtDuration(secs / n)}</span>`).join('') +
         `</div>`
       : '<div class="muted">No fish caught in this window.</div>';
     setTip(fishPill,
       `<div class="tip-title">Fish caught</div>` +
-      `<div><b>${fish.toLocaleString()}</b> fish · <b>${fmtRate(fishPerSec)}</b>/s · <b>${fmtRate(fishPerSec * 60)}</b>/min</div>` +
+      `<div><b>${fish.toLocaleString()}</b> fish · <b>${fmtRate(fishPerSec * 60)}</b>/min · <b>${fmtRate(fishPerSec)}</b>/s</div>` +
       `<div class="muted">${casts.toLocaleString()} casts, ${casts ? fmtDec(fish / casts) : 0} fish per cast</div>` +
       `<div class="tip-sep"></div>${table}${footer}`);
 
     const chests = delta('chests');
     const chestsPerSec = chests / secs;
-    chestPill.innerHTML = iconRate(chestImg, chestsPerSec);
+    chestPill.innerHTML = iconRate(chestImg, chestsPerSec * 60);
     setTip(chestPill,
       `<div class="tip-title">Chests found</div>` +
-      `<div><b>${chests.toLocaleString()}</b> chests · <b>${fmtRate(chestsPerSec)}</b>/s · <b>${fmtRate(chestsPerSec * 60)}</b>/min</div>` +
+      `<div><b>${chests.toLocaleString()}</b> chests · <b>${fmtRate(chestsPerSec * 60)}</b>/min · <b>${fmtRate(chestsPerSec)}</b>/s</div>` +
       `<div class="muted">Caught while fishing; bounty, company and shop chests aren't counted.</div>${footer}`);
 
     const xp = delta('xp');
     const xpPerSec = xp / secs;
     const pl = S.state.player;
     const xpLeft = Math.max(0, S.xpToNext(pl.level) - pl.xp);
-    xpPill.innerHTML = `+${fmtDecHtml(xpPerSec)}<span class="per"> XP/s</span>`;
+    xpPill.innerHTML = `+${fmtDecHtml(xpPerSec * 60)}<span class="per"> XP/min</span>`;
     setTip(xpPill,
       `<div class="tip-title">XP gained</div>` +
-      `<div><b>${fmtDecHtml(xp)}</b> XP · <b>${fmtDecHtml(xpPerSec)}</b>/s · <b>${fmtDecHtml(xpPerSec * 60)}</b>/min</div>` +
+      `<div><b>${fmtDecHtml(xp)}</b> XP · <b>${fmtDecHtml(xpPerSec * 60)}</b>/min · <b>${fmtDecHtml(xpPerSec)}</b>/s</div>` +
       `<div>Next level (${pl.level + 1}) in about <b>${fmtDuration(xpPerSec > 0 ? xpLeft / xpPerSec : Infinity)}</b></div>${footer}`);
 
     for (const p of pills) {
@@ -894,10 +901,12 @@ const incomePills = async () => {
   const AUTO_KEY = 'measured-autoclick-cps';
   let autoCps = 14;
   try { autoCps = Math.min(AUTO_MAX, Math.max(AUTO_MIN, Math.round(+localStorage.getItem(AUTO_KEY)) || 14)); } catch {}
+  // Its toggle and − / +: shown in Settings > Mods, under this mod's row (the manager asks for them
+  // through window.incomeAutoClickControls each time it draws the Mods tab)
   const autoWrap = document.createElement('div');
-  autoWrap.className = 'currency';
   autoWrap.id = 'measured-autoclick-wrap';
   autoWrap.style.cssText = 'display:flex;align-items:center;gap:3px';
+  window.incomeAutoClickControls = () => autoWrap;
   const autoBtn = document.createElement('span');
   autoBtn.className = 'rate';
   autoBtn.setAttribute('role', 'button');
@@ -1078,6 +1087,7 @@ const incomePills = async () => {
   };
   window.stopGoldLogger = () => {
     delete window.setGoldLoggerPeriod;
+    delete window.incomeAutoClickControls;
     clearInterval(id);
     clearInterval(gearTimer);
     clearInterval(autoTipTimer);
@@ -1097,285 +1107,57 @@ const incomePills = async () => {
 // =====================================================================================================
 // Build switcher (was build-switcher.js)
 //
-// It adds a key to the bottom bar, left of the Angler button, showing which of your saved builds (the
-// game's gear sets, Angler > Gear: up to 5, each with its stat priorities) you're wearing: 1-5, or –
-// when it's none of them.
-//  - a line above the Ascension bar names the build you're wearing, with its stat priorities
-//  - click either for a menu of every saved build; pick one to put it on
-//  - or press 1-5 anywhere in the game (not while typing in chat or a box)
+// Press 1-5 anywhere in the game (not while typing in chat or a box) to put on one of your saved
+// builds (the game's gear sets, Angler > Character: up to 5, each with its stat priorities). A toast
+// says which went on. Quicklinks shows the number key on each build's button.
 // Putting a build on is the game's own "put this set on" (the same as clicking the set in Angler >
-// Gear): every piece you still have goes on, and its stat priorities come back with it.
-// Stop it (and remove the key) with:  stopBuildSwitcher(), or untick it in Settings > Mods
+// Character): every piece you still have goes on, and its stat priorities come back with it.
+// Stop it (and the keys) with:  stopBuildSwitcher(), or untick it in Settings > Mods
 // =====================================================================================================
 const buildSwitcher = async () => {
   const mod = (path) => import(new URL(path, location.origin).href);
   const S = await mod('/src/state.js');
   const { act } = await mod('/src/actions.js');
-  const { GEAR_SETS, STATS, RARITIES } = await mod('/src/data.js');
-  const { toast, openWindow } = await mod('/src/ui.js');
+  const { GEAR_SETS } = await mod('/src/data.js');
+  const { toast } = await mod('/src/ui.js');
   const MAX = GEAR_SETS?.max ?? 5;
 
   window.stopBuildSwitcher?.(); // replace one already running
-
-  const bar = document.getElementById('actionbar');
-  const angler = bar?.querySelector('[data-win="angler"]');
-  if (!bar) return console.warn('[build switcher] The game page was not found (#actionbar)');
-
-  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  // As the game names priorities (ui.js priorityName)
-  const priorityName = (key) => (key === 'gold' ? 'Income' : STATS[key]?.seekTier ? `${RARITIES[STATS[key].seekTier].name} odds` : STATS[key]?.name ?? key);
-  const priorities = (list) => (list?.length ? list.map((k, i) => `${i + 1}. ${priorityName(k)}`).join(' · ') : 'Income');
-
-  // ---------- Which build you're wearing ----------
-  // A build is worn when every piece of it you still own is on (pieces you've sold don't count
-  // against it). Several can match at once (one set inside another): then the one you last picked
-  // here, else the one whose priorities are the ones in use, else the one with the most pieces.
-  let last = -1;
-  const owned = (set) => Object.entries(set.items ?? {}).filter(([, uid]) => S.itemByUid(uid));
-  const current = () => {
-    const st = S.state;
-    const now = JSON.stringify(st.settings?.buildPriority ?? []);
-    const worn = (st.gearSets ?? [])
-      .map((set, i) => ({ i, set, pieces: owned(set) }))
-      .filter(({ pieces }) => pieces.length && pieces.every(([slot, uid]) => st.equipped[slot] === uid));
-    if (!worn.length) return -1;
-    if (worn.some((w) => w.i === last)) return last;
-    const score = (w) => (JSON.stringify(w.set.priority ?? []) === now ? 1000 : 0) + w.pieces.length;
-    return worn.sort((a, b) => score(b) - score(a))[0].i;
-  };
-
-  // ---------- Styles ----------
-  const style = document.createElement('style');
-  style.id = 'buildswitch-style';
-  style.textContent = `
-#buildswitch-btn .bs-num{font:700 20px/1 var(--font);text-shadow:1px 1px 0 #000}
-#buildswitch-btn.none .bs-num{opacity:.5}
-#buildswitch-menu{position:fixed;z-index:1000;display:grid;min-width:260px;max-width:min(420px,calc(100vw - 16px));padding:4px;
-  border:9px solid;border-image:var(--fr-tip);box-shadow:0 10px 24px rgba(0,0,0,.5)}
-#buildswitch-menu[hidden]{display:none}
-#buildswitch-menu .bs-head{padding:4px 8px 8px;margin-bottom:4px;font-weight:700;border-bottom:1px solid #3a4a30}
-#buildswitch-menu .pm-item{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:baseline;cursor:pointer}
-#buildswitch-menu .pm-item kbd{grid-row:span 2;align-self:center;min-width:18px;text-align:center}
-#buildswitch-menu .pm-item .bs-pri{grid-column:2;font-size:12px}
-#buildswitch-menu .pm-item.on{background:rgba(253,230,138,.14)}
-#buildswitch-menu .pm-item.on .bs-name{color:#fde68a}
-#buildswitch-menu .pm-item:disabled{cursor:default;opacity:.55}
-#buildswitch-menu .pm-item:disabled:hover{background:none}
-#buildswitch-menu .bs-foot{margin-top:4px;border-top:1px solid #3a4a30}
-#buildswitch-row{display:flex;align-items:baseline;gap:8px;padding:0 4px;font:inherit;font-size:13px;color:inherit;
-  text-shadow:1px 1px 0 #000;background:none;border:0;cursor:pointer;text-align:left;white-space:nowrap;
-  contain:inline-size;overflow:hidden}
-#buildswitch-row .lvl{min-width:50px;color:#fde68a}
-#buildswitch-row .bs-pri{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px}
-#buildswitch-row:hover .bs-name{color:#f4f0b0}
-#buildswitch-tip{position:fixed;z-index:1000;max-width:min(380px,calc(100vw - 16px));padding:8px 12px;pointer-events:none;
-  font-family:var(--font);font-size:14px;line-height:1.35;color:var(--text);border:9px solid;border-image:var(--fr-tip);
-  box-shadow:0 6px 18px rgba(0,0,0,.6)}`;
-  document.head.append(style);
-
-  // ---------- The key ----------
-  // The game's own key look (.action-btn: frame, size, corner key label). It has no data-win, so the
-  // bar's click handler leaves it alone.
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.id = 'buildswitch-btn';
-  btn.className = 'action-btn';
-  btn.setAttribute('aria-label', 'Builds');
-  btn.setAttribute('aria-haspopup', 'menu');
-  btn.innerHTML = '<span class="bs-num"></span><kbd>1-5</kbd>';
-  // The bar's buttons sit in groups (.ab-group), so the Angler button isn't a child of the bar itself:
-  // insertBefore on the bar threw, and the key never appeared. The game also fills the bar in once
-  // you're signed in (ui.js initUI sets its innerHTML), which drops a key put in before that: render()
-  // puts it back.
-  const placeKey = () => {
-    const a = bar.querySelector('[data-win="angler"]');
-    if (a) a.before(btn);
-    else bar.prepend(btn);
-  };
-  placeKey();
-  const num = btn.querySelector('.bs-num');
-
-  // ---------- The status line ----------
-  // Above the Ascension bar, in the same style as it and the XP bar: the build you're wearing, its
-  // stat priorities, and how many of its pieces you're missing. Click it for the menu too. It never
-  // widens the bar (contain: inline-size): a long line is cut off with "…".
-  const row = document.createElement('button');
-  row.type = 'button';
-  row.id = 'buildswitch-row';
-  row.setAttribute('aria-label', 'Current build (opens the builds menu)');
-  const placeRow = () => {
-    const ascRow = document.getElementById('asc-row');
-    if (ascRow) ascRow.before(row);
-    else document.getElementById('hotbar')?.prepend(row);
-  };
-  placeRow();
-  const rowHtml = () => {
-    const sets = S.state.gearSets ?? [];
-    const i = current();
-    if (i < 0) {
-      return `<span class="lvl">Build –</span><span class="muted">${sets.length ? 'Not wearing a saved build' : 'No builds saved yet (Angler &gt; Gear)'}</span>`;
-    }
-    const set = sets[i];
-    const pieces = Object.keys(set.items ?? {}).length;
-    const have = owned(set).length;
-    const missing = have < pieces ? ` <span style="color:#fca5a5">${have}/${pieces} pieces</span>` : '';
-    return `<span class="lvl">Build ${i + 1}</span><b class="bs-name">${esc(set.name)}</b>${missing}<span class="bs-pri muted">${esc(priorities(set.priority))}</span>`;
-  };
-
-  // Tooltip: a lookalike of the game's (which only shows its own data-tip keys)
-  const tip = document.createElement('div');
-  tip.id = 'buildswitch-tip';
-  tip.hidden = true;
-  document.body.append(tip);
-  const tipHtml = () => {
-    const sets = S.state.gearSets ?? [];
-    const i = current();
-    const head = i >= 0
-      ? `<div class="tip-title">Build ${i + 1}: ${esc(sets[i].name)}</div><div class="muted">${esc(priorities(sets[i].priority))}</div>`
-      : `<div class="tip-title">Builds</div><div class="muted">${sets.length ? "You're not wearing any of your saved builds." : 'No builds saved yet: save one in Angler > Gear.'}</div>`;
-    return `${head}<div class="tip-sep"></div><div class="muted">Click to pick a build, or press 1-${MAX}.</div>`;
-  };
-  const placeTip = () => {
-    const r = btn.getBoundingClientRect();
-    const { width, height } = tip.getBoundingClientRect();
-    tip.style.left = `${Math.min(Math.max(8, r.left + r.width / 2 - width / 2), innerWidth - width - 8)}px`;
-    tip.style.top = `${Math.max(8, r.top - height - 8)}px`;
-  };
-  btn.addEventListener('pointerenter', () => {
-    if (!menu.hidden) return;
-    tip.innerHTML = tipHtml();
-    tip.hidden = false;
-    placeTip();
-  });
-  btn.addEventListener('pointerleave', () => { tip.hidden = true; });
-
-  // ---------- The menu ----------
-  const menu = document.createElement('div');
-  menu.id = 'buildswitch-menu';
-  menu.setAttribute('role', 'menu');
-  menu.hidden = true;
-  document.body.append(menu);
-  const renderMenu = () => {
-    const sets = S.state.gearSets ?? [];
-    const on = current();
-    const rows = [];
-    for (let i = 0; i < MAX; i++) {
-      const set = sets[i];
-      if (!set) {
-        rows.push(`<button class="pm-item" role="menuitem" disabled><kbd>${i + 1}</kbd><span class="muted">Empty</span></button>`);
-        continue;
-      }
-      const pieces = Object.keys(set.items ?? {}).length;
-      const have = owned(set).length;
-      rows.push(
-        `<button class="pm-item${i === on ? ' on' : ''}" role="menuitem" data-build="${i}"><kbd>${i + 1}</kbd>` +
-          `<span><b class="bs-name">${esc(set.name)}</b> <span class="muted">${have}/${pieces} pieces${i === on ? ' · wearing' : ''}</span></span>` +
-          `<span class="bs-pri muted">${esc(priorities(set.priority))}</span></button>`,
-      );
-    }
-    menu.innerHTML =
-      `<div class="bs-head">Builds</div>${rows.join('')}` +
-      `<button class="pm-item bs-foot" role="menuitem" data-manage><span></span><span class="muted">Save or change builds (Angler &gt; Gear)</span></button>`;
-  };
-  const placeMenu = () => {
-    const r = btn.getBoundingClientRect();
-    const { width, height } = menu.getBoundingClientRect();
-    menu.style.left = `${Math.min(Math.max(8, r.left), innerWidth - width - 8)}px`;
-    menu.style.top = `${Math.max(8, r.top - height - 10)}px`;
-  };
-  const setMenu = (open) => {
-    menu.hidden = !open;
-    btn.classList.toggle('active', open);
-    btn.setAttribute('aria-expanded', String(open));
-    if (open) {
-      tip.hidden = true;
-      renderMenu();
-      placeMenu();
-    }
-  };
-  btn.addEventListener('click', () => setMenu(menu.hidden));
-  row.addEventListener('click', () => setMenu(menu.hidden));
-  menu.addEventListener('click', (e) => {
-    const item = e.target.closest('[data-build], [data-manage]');
-    if (!item || item.disabled) return;
-    setMenu(false);
-    if (item.hasAttribute('data-manage')) return openWindow('character');
-    wear(Number(item.dataset.build));
-  });
-  const onPointerDown = (e) => {
-    if (!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target) && !row.contains(e.target)) setMenu(false);
-  };
-  document.addEventListener('pointerdown', onPointerDown);
 
   // ---------- Putting a build on ----------
   let busy = false;
   const wear = async (i) => {
     const set = S.state.gearSets?.[i];
-    if (!set) return toast(`No build ${i + 1} saved yet (save one in Angler > Gear)`, true);
+    if (!set) return toast(`No build ${i + 1} saved yet (save one in Angler > Character)`, true);
     if (busy) return;
     busy = true;
-    last = i;
     try {
       const n = await act(S.game, 'equipGearSet', { index: i });
       if (!n) toast("None of that build's gear is in your bag any more (or you can't wear it yet)", true);
       else toast(`Build ${i + 1}: ${set.name}`);
     } finally {
       busy = false;
-      render();
     }
   };
 
   // ---------- Hotkeys ----------
-  // 1-5 put a build on. Not while typing, with a dialog up, or with Ctrl / Alt / Cmd held. Runs before
-  // the game's own keys (capture), so Esc closes this menu instead of opening Settings.
+  // 1-5 put a build on. Not while typing, with a dialog up, or with Ctrl / Alt / Cmd held.
   const onKey = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
     if (document.getElementById('modal-root')?.firstElementChild) return;
-    if (e.key === 'Escape' && !menu.hidden) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      setMenu(false);
-      return;
-    }
     const d = /^Digit([1-9])$/.exec(e.code)?.[1] ?? (/^[1-9]$/.test(e.key) ? e.key : null);
     if (!d || Number(d) > MAX) return;
     e.preventDefault();
     if (e.repeat) return;
-    setMenu(false);
     wear(Number(d) - 1);
   };
   window.addEventListener('keydown', onKey, true);
 
-  // ---------- Keeping it current ----------
-  // Gear changes anywhere (the Gear window, a set button, a new drop) show up within half a second
-  const render = () => {
-    if (!btn.isConnected || (bar.querySelector('[data-win="angler"]') && btn.nextElementSibling?.dataset.win !== 'angler')) placeKey();
-    if (!row.isConnected) placeRow();
-    const i = current();
-    const text = i >= 0 ? String(i + 1) : '–';
-    if (num.textContent !== text) num.textContent = text;
-    btn.classList.toggle('none', i < 0);
-    const line = rowHtml();
-    if (row.dataset.html !== line) { row.dataset.html = line; row.innerHTML = line; }
-    if (!menu.hidden) renderMenu();
-    if (!tip.hidden) tip.innerHTML = tipHtml();
-  };
-  render();
-  const timer = setInterval(render, 500);
-  const onResize = () => { tip.hidden = true; setMenu(false); };
-  addEventListener('resize', onResize);
-
+  window.buildSwitcherKeys = MAX; // Quicklinks shows a key on each build while this runs
   window.stopBuildSwitcher = () => {
-    clearInterval(timer);
     window.removeEventListener('keydown', onKey, true);
-    document.removeEventListener('pointerdown', onPointerDown);
-    removeEventListener('resize', onResize);
-    btn.remove();
-    row.remove();
-    menu.remove();
-    tip.remove();
-    style.remove();
+    delete window.buildSwitcherKeys;
     delete window.stopBuildSwitcher;
   };
 };
@@ -2007,40 +1789,675 @@ const weatherForecast = async () => {
 };
 
 // =====================================================================================================
+// Gear judge
+//
+// The game marks gear ▲ (better for your build) or ▼ by comparing your stats with and without it under the
+// conditions of this very moment: this weather and time of day, any Twitch or event bonus running now, and
+// whether you've clicked in the last 3 seconds (a pause to look at your bag counts as idle play, with its
+// 2.5× faster bites). So a night-only power looks useless by day, luck gear looks worse in a Cursed Tide,
+// and idle gear looks better while you read the bag. This judges gear over the time you'll fish in it:
+//  - Weather and time of day: averaged over the whole cycle, each by the share of the time it lasts (a day
+//    is 40 minutes, the weather can change every 12, night-only weather comes only at night). Or only the
+//    ones you pick, in Settings > Mods or above the upgrades in Quicklinks' Bag: a time of day, a
+//    weather, both, or "now" (for now only the most common: Day and Night; Clear, Overcast, Rain, Fog, Storm)
+//  - Clicking: your click rate over the last few minutes (the game's own click habit) sets how much of the
+//    time you fish idle (no click for 3 s) and how fast you click the rest of it; gold is worked out for
+//    each, and added up by their shares. Or pick "Idle" (never a click: Patience, Still Waters and
+//    Unyielding all the time) or "Auto-clicker" (never idle, at the Auto-click rate set under Income
+//    pills in Settings > Mods: the Frenzy bar, click power and Stormrider all the time)
+//  - Or "Opening chests": the game fills a chest when you open it, with the gear you're wearing then
+//    (state.js rollChests). This judges gear by the money and treasure the chests you have would pay with it
+//    on (loot.js rollChestContents: catch value, treasure, chest luck, and Plunderer, Magpie and Fortune's
+//    Embrace), instead of your build. Wear the winners as a saved gear set just to open chests. The gear
+//    found in chests isn't counted. Opened as you'd open them from a window, idle: not clicking the water
+//  - Bonuses that end within the hour (Twitch, events, a Golden Fish) are left out
+//  - Gear you can't wear yet isn't an upgrade
+//  - Sets are judged as sets too: a set's bonuses come at 2, 4 and 6 pieces, so one piece of a set you don't
+//    wear never looks good alone. The pieces in your bag and the Market are also tried together, every way that reaches a
+//    bonus (with the ones you wear); a set that pays off that way has its pieces' ▲ in the set colour, with
+//    the change for putting them all on, and Quicklinks lists it with its pieces (a Market one as its stall: buy it first)
+// The rest is the game's own: its stats with and without the piece (the real getStats, every cap and set
+// bonus), its gold a second and other build measures (priorityMetric), your build's priorities and their
+// weights (Bags > Your build), and the same ½% line for a badge.
+// It redraws the ▲ / ▼ badges in Bags > Gear and in the Market; Quicklinks uses it too. The game's own
+// "Best upgrade" sort, its tooltips and the sidebar's ▲ still use the game's measure.
+// Stop it with:  stopGearJudge(), or untick it in Settings > Mods
+// =====================================================================================================
+const gearJudge = async () => {
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const S = await mod('/src/state.js');
+  const W = await mod('/src/world.js');
+  const { BASE, OVERFLOW, SET_BY_ID, SET_COLOR, SLOTS, RARITIES, ZONES, ZONE_BY_ID, CHEST_GOLD, TREASURE_VALUE } = await mod('/src/data.js');
+  const { tierOdds, gearDropScale } = await mod('/src/loot.js');
+  const { hex } = await mod('/src/format.js');
+  const { MAX_CPS } = await mod('/src/clicks.js');
+
+  window.stopGearJudge?.(); // replace one already running
+
+  const TIME_KEY = 'idle-angler-judge-time';
+  const WEATHER_KEY = 'idle-angler-judge-weather';
+  const ACTIVITY_KEY = 'idle-angler-judge-activity';
+  const AUTO_KEY = 'measured-autoclick-cps'; // the Auto-click rate (Income pills mod), 14 until it's set
+  const IDLE_S = 3; // state.js IDLE_SPEED_MS: no click for this long and play counts as idle
+  const STILL_SPEED = 1.5; // state.js: Still Waters (4 pieces) bites ×1.5 while idle
+  const AHEAD_MS = 60 * 60_000; // judged an hour from now: bonuses that end before then are left out
+  const SLICE_MS = 10; // work a turn, so the game keeps running smoothly while it catches up
+
+  // ---------- The conditions, and how long each lasts ----------
+  // The day (40 min) and the weather slots (12 min) line up again every 3 days, 10 slots. Over that, each
+  // slot's weather is drawn from those allowed at its middle's time of day (world.js weatherForSlot), and a
+  // night-only weather is clear for the part of its slot that isn't night (naturalWeather).
+  const SHARES = (() => {
+    const day = W.DAY_LENGTH_MS;
+    const slotMs = W.WEATHER_SLOT_MS;
+    const period = 3 * day;
+    const step = 15_000;
+    const phaseAt = (t) => {
+      const f = (t % day) / day;
+      return W.PHASES.find((p) => f >= p.start && f < p.end) ?? W.PHASES[0];
+    };
+    const out = new Map();
+    for (let t = 0; t < period; t += step) {
+      const mid = phaseAt((Math.floor(t / slotMs) + 0.5) * slotMs);
+      const phase = phaseAt(t);
+      const options = W.WEATHERS.filter((w) => !w.phase || w.phase === mid.id);
+      const total = options.reduce((n, w) => n + w.weight, 0);
+      for (const w of options) {
+        const weather = w.phase && w.phase !== phase.id ? 'clear' : w.id;
+        const key = `${phase.id}|${weather}`;
+        const c = out.get(key) ?? { phase: phase.id, weather, share: 0 };
+        c.share += (w.weight / total) * (step / period);
+        out.set(key, c);
+      }
+    }
+    return [...out.values()];
+  })();
+  // The choices: any, now, and only the most common for now: the times of day that last a fifth of the day
+  // or more (Day and Night), and the 5 weathers you see most (Clear, Overcast, Rain, Fog and Storm)
+  const shareOf = (key, id) => SHARES.reduce((n, c) => n + (c[key] === id ? c.share : 0), 0);
+  const COMMON_TIMES = W.PHASES.filter((p) => shareOf('phase', p.id) >= 0.2);
+  const COMMON_WEATHERS = [...W.WEATHERS].sort((a, b) => shareOf('weather', b.id) - shareOf('weather', a.id)).slice(0, 5);
+  const TIMES = [['any', 'Any time of day'], ['now', 'Time of day now'], ...COMMON_TIMES.map((p) => [p.id, p.name])];
+  const WEATHER_PICKS = [['any', 'Any weather'], ['now', 'Weather now'], ...W.WEATHERS.filter((w) => COMMON_WEATHERS.includes(w)).map((w) => [w.id, w.name])];
+  // How you play: as your clicks of the last few minutes say, idle (never a click), or with the
+  // Auto-clicker on (never idle, at its rate)
+  const autoRate = () => {
+    try {
+      return Math.min(MAX_CPS, Math.max(1, Math.round(+localStorage.getItem(AUTO_KEY)) || 14));
+    } catch {
+      return 14;
+    }
+  };
+  const activities = () => [['now', 'As you click now'], ['idle', 'Idle'], ['auto', `Auto-clicker ${autoRate()}/s`], ['chests', 'Opening chests']];
+  window.gearJudgeChoices = { time: TIMES, weather: WEATHER_PICKS, get activity() { return activities(); } }; // the Settings > Mods dropdowns
+
+  const read = (key, list, fallback = 'any') => {
+    try {
+      const v = localStorage.getItem(key);
+      return list.some(([id]) => id === v) ? v : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  let pick = { time: read(TIME_KEY, TIMES), weather: read(WEATHER_KEY, WEATHER_PICKS), activity: read(ACTIVITY_KEY, activities(), 'now') };
+
+  /** The conditions to judge in, with their shares of the time (adding up to 1). */
+  function conditions() {
+    const now = W.worldAt();
+    const time = pick.time === 'now' ? now.phase.id : pick.time;
+    const weather = pick.weather === 'now' ? now.weather.id : pick.weather;
+    let list = SHARES.filter((c) => (time === 'any' || c.phase === time) && (weather === 'any' || c.weather === weather));
+    // A pair that doesn't happen on its own (Aurora by day, or the owner's weather): just that pair
+    if (!list.length) list = [{ phase: time === 'any' ? 'night' : time, weather: weather === 'any' ? 'clear' : weather, share: 1 }];
+    const total = list.reduce((n, c) => n + c.share, 0);
+    return list.map((c) => ({ ...c, share: c.share / total }));
+  }
+
+  /** Runs fn with the game's world set to these conditions, an hour ahead, then puts both back. */
+  function under(cond, fn) {
+    const saved = W.getOverride();
+    const realNow = W.clock.now;
+    const at = realNow() + AHEAD_MS;
+    W.setOverride('phase', cond.phase);
+    W.setOverride('weather', cond.weather);
+    W.clock.now = () => at;
+    try {
+      return fn();
+    } finally {
+      W.clock.now = realNow;
+      W.setOverride('phase', saved.phase);
+      W.setOverride('weather', saved.weather);
+    }
+  }
+
+  // Stats an hour ahead are idle play (no click for an hour): Patience's faster bites, and Still Waters'.
+  // While clicking, those are taken back out, with what follows from the bite time (the animations, and
+  // multi-catch from bites past the animation floor), as getStats works them out.
+  const floor = 0.3 * BASE.fishTime;
+  function clicking(s) {
+    if (!s.idleBonus) return s;
+    const k = ((BASE.idleSpeed ?? 1) > 1 ? BASE.idleSpeed : 1) * (s.flags?.stillSpeed ? STILL_SPEED : 1);
+    const fishTime = s.fishTime * k;
+    return {
+      ...s,
+      speedMult: s.speedMult / k,
+      fishTime,
+      animScale: Math.min(1, Math.max(0.3, fishTime / BASE.fishTime)),
+      speedMultiCatch: fishTime < floor ? Math.log2(floor / fishTime) * OVERFLOW.speedMultiCatch : 0,
+      idleBonus: false,
+    };
+  }
+
+  // ---------- Judging ----------
+  let ctx = null; // what this pass is judged with; a new one when any of it changes
+  function context() {
+    let idle = 1; // the share of the time with no click for 3 s
+    let cps = 0; // clicks a second while clicking
+    if (pick.activity === 'auto') {
+      idle = 0;
+      cps = autoRate();
+    } else if (pick.activity !== 'idle') {
+      const rate = S.clickRate();
+      idle = Math.exp(-IDLE_S * rate);
+      cps = Math.min(MAX_CPS, rate / Math.max(1e-6, 1 - idle));
+    }
+    const now = W.worldAt();
+    const chests = pick.activity === 'chests';
+    const sig = [
+      chests ? Object.keys(S.state.chests ?? {}).filter((k) => S.state.chests[k] > 0).sort().join(',') : '', // the kinds of chest you have
+      pick.time,
+      pick.weather,
+      pick.activity,
+      pick.activity === 'auto' ? cps : '', // the Auto-click rate (yours: by the 5% step below)
+      pick.time === 'now' ? now.phase.id : '',
+      pick.weather === 'now' ? now.weather.id : '',
+      S.state.player?.level,
+      S.state.zone,
+      JSON.stringify(S.state.equipped),
+      JSON.stringify(S.buildPriority()),
+      JSON.stringify(S.state.settings.statLimits ?? {}),
+      Math.round(idle * 20), // a 5% step in idle play
+      Math.floor(Date.now() / 60_000), // upgrades, perks and levels bought: once a minute
+    ].join('|');
+    if (ctx?.sig === sig) return ctx;
+    const conds = conditions();
+    return (ctx = { sig, conds, idle, cps, zone: S.currentZone(), keys: chests ? ['chests'] : S.buildPriority(), chests: chests ? chestKinds() : null, base: new Map(), version: (ctx?.version ?? 0) + 1 });
+  }
+
+  // ---------- Opening chests ----------
+  // The chests you have, by kind ("zone:tier" and how many), each kind weighted by its count. With none, the
+  // chests of the water you're in, by how often each rarity comes up for you now.
+  function chestKinds() {
+    const list = [];
+    for (const [key, n] of Object.entries(S.state.chests ?? {})) {
+      const [zoneId, tier] = key.split(':');
+      if (n > 0 && ZONE_BY_ID[zoneId]) list.push({ zone: ZONE_BY_ID[zoneId], tier: Number(tier), n });
+    }
+    if (list.length) return list;
+    const zone = S.currentZone();
+    return tierOdds(S.getStats().chestLuckMult, zone.maxTier).map((n, tier) => ({ zone, tier, n })).filter((k) => k.n > 0);
+  }
+  const CHEST_ITEM_CHANCE = 0.35; // loot.js: each roll in a chest is gear this often, treasure otherwise
+  /** Money and treasure from opening one chest of each kind with these stats, as loot.js rollChestContents pays on average. */
+  function chestMoney(s, kinds) {
+    const chestValue = s.chestValueMult ?? 1; // Plunderer, Magpie, Fortune's Embrace
+    let sum = 0;
+    for (const { zone, tier, n } of kinds) {
+      const base = s.fishValue ?? zone.baseValue;
+      const gold = base * RARITIES[tier].valueMult * CHEST_GOLD * s.valueMult * chestValue;
+      // Each roll's treasure: a rarity from chest luck, no lower than 2 under the chest's (loot.js tierOddsFrom)
+      const odds = tierOdds(s.chestLuckMult, Math.min(RARITIES.length - 1, zone.maxTier + 1));
+      const floor = Math.max(0, tier - 2);
+      const treasureTier = odds.reduce((t, q, i) => t + (q || 0) * RARITIES[Math.max(i, floor)].valueMult, 0);
+      const treasure = base * treasureTier * TREASURE_VALUE * s.treasureMult * chestValue;
+      const rolls = 1 + Math.floor(tier / 2);
+      sum += n * (gold + rolls * (1 - CHEST_ITEM_CHANCE * gearDropScale(s, zone)) * treasure);
+    }
+    return sum;
+  }
+
+  /** Each build measure, summed over the conditions by their shares (idle and clicking by theirs). */
+  function measures(c, statsFor) {
+    const sums = c.keys.map(() => 0);
+    for (const cond of c.conds) {
+      const s = under(cond, statsFor);
+      const a = clicking(s);
+      c.keys.forEach((key, i) => {
+        if (key === 'chests') sums[i] += cond.share * chestMoney(s, c.chests); // opened idle (from a window)
+        else sums[i] += cond.share * (c.idle * S.priorityMetric(key, s, c.zone, 0) + (1 - c.idle) * S.priorityMetric(key, a, c.zone, c.cps));
+      });
+    }
+    return sums;
+  }
+
+  /** How much better the build gets with this piece on (0.12 = 12%), as the game's upgradeValue weighs it. */
+  function judge(c, item) {
+    if (S.isEquipped(item)) return 0;
+    if (!S.canWear(item)) return null;
+    const owned = S.state.items.includes(item);
+    if (!owned) S.state.items.push(item); // the Market's: in the list only while it's worked out (as upgradeValueOf)
+    try {
+      return compare(c, measures(c, () => S.statsIfEquipped(item.uid)));
+    } finally {
+      if (!owned) S.state.items.splice(S.state.items.indexOf(item), 1);
+    }
+  }
+
+  /** The same for several pieces put on at once (pieces of a set, each in its own slot). */
+  function judgeGroup(c, items) {
+    const map = Object.fromEntries(items.map((it) => [it.slot, it.uid]));
+    const shop = items.filter((it) => !S.state.items.includes(it));
+    S.state.items.push(...shop); // the Market's: in the list only while it's worked out (as in judge)
+    try {
+      return compare(c, measures(c, () => withEquipped(map, () => S.statsWithBonus('value', 0))));
+    } finally {
+      for (const it of shop) S.state.items.splice(S.state.items.indexOf(it), 1);
+    }
+  }
+  // What's worn, changed for a moment (as the game's statsIfEquipped does for one slot), then put back
+  function withEquipped(map, fn) {
+    const eq = S.state.equipped;
+    const saved = {};
+    for (const [slot, uid] of Object.entries(map)) {
+      saved[slot] = eq[slot];
+      eq[slot] = uid;
+    }
+    try {
+      return fn();
+    } finally {
+      for (const [slot, uid] of Object.entries(saved)) eq[slot] = uid;
+    }
+  }
+
+  /** Build measures with some gear on, against now: the game's weighted change (upgradeValue). */
+  function compare(c, worn) {
+    if (!c.base.has('now')) c.base.set('now', measures(c, () => S.statsWithBonus('value', 0)));
+    const base = c.base.get('now');
+    let sum = 0;
+    let weights = 0;
+    c.keys.forEach((key, i) => {
+      const w = S.PRIORITY_WEIGHTS[i];
+      sum += w * Math.log(worn[i] / base[i] || 1);
+      weights += w;
+    });
+    return Math.exp(sum / weights) - 1;
+  }
+
+  // Answers are kept until what they were judged with changes; until a new one is ready, the last one
+  // stands. New work waits in a queue and is done a slice at a time.
+  const answers = new Map(); // uid -> { version, change }
+  const queue = new Map(); // key -> the work, given what to judge with
+  let pump = 0;
+  let spent = 0;
+  let sliceStart = 0;
+  const inSlice = () => {
+    const t = performance.now();
+    if (t - sliceStart > 50) {
+      sliceStart = t;
+      spent = 0;
+    }
+    return spent < SLICE_MS;
+  };
+  const enqueue = (key, fn) => {
+    if (!queue.has(key)) queue.set(key, fn);
+    if (!pump) pump = setTimeout(work, 30);
+  };
+  function work() {
+    pump = 0;
+    const t0 = performance.now();
+    for (const [key, fn] of queue) {
+      if (performance.now() - t0 > SLICE_MS) break;
+      queue.delete(key);
+      fn(context()); // work added meanwhile (a set's tries) comes after, in this loop or the next
+    }
+    if (queue.size) pump = setTimeout(work, 30);
+    else dispatchEvent(new Event('idle-angler-gear-judge'));
+  }
+  const judgeNow = (c, item) => {
+    const v = judge(c, item);
+    answers.set(item.uid, { version: c.version, change: v });
+    return v;
+  };
+  /** The change for this piece, or undefined while it waits to be judged. null: it can't be worn yet. */
+  function change(item) {
+    if (!item?.uid) return undefined;
+    const c = context();
+    const a = answers.get(item.uid);
+    if (a?.version === c.version) return a.change;
+    if (!queue.size && inSlice()) {
+      const t0 = performance.now();
+      const v = judgeNow(c, item);
+      spent += performance.now() - t0;
+      return v;
+    }
+    enqueue(item.uid, (cc) => judgeNow(cc, item));
+    return a?.change;
+  }
+
+  // ---------- Sets, judged together ----------
+  // A set's bonuses come at 2, 4 and 6 pieces worn, so one piece of a set you don't wear does nothing on its
+  // own and never looks like an upgrade. Here the set pieces in your bag are also judged together: for each
+  // set, the best piece of it for each slot (the one that does most on its own), and every way of putting
+  // some of them on that reaches one of its bonuses, counting the pieces of it you already wear. The best
+  // way for each set is kept when it beats putting on just its best piece by more than ½%.
+  let sets = { sig: '', list: [], byUid: new Map() };
+  let planned = '';
+  let plans = 0;
+  // The set pieces to try: the ones in your bag, and the ones for sale in the Market now
+  const shopGear = () => (S.state.shop?.stock ?? []).filter((x) => x.type === 'item' && !x.sold && x.item?.slot).map((x) => x.item);
+  const setPieces = () => [...S.looseGear(), ...shopGear()].filter((i) => i.set && S.canWear(i));
+  const setSig = (c) => `${c.version}|${setPieces().map((i) => i.uid).join(',')}`;
+  function planSets(c, sig) {
+    const plan = ++plans;
+    const next = new Map(); // set id -> its best way
+    const bySet = new Map();
+    for (const item of setPieces()) {
+      if (!item.set || !SET_BY_ID[item.set] || !S.canWear(item)) continue;
+      if (!bySet.has(item.set)) bySet.set(item.set, []);
+      bySet.get(item.set).push(item);
+    }
+    for (const [id, pieces] of bySet) {
+      const def = SET_BY_ID[id];
+      const wornSlots = new Set(SLOTS.filter((sl) => S.itemByUid(S.state.equipped[sl.id])?.set === id).map((sl) => sl.id));
+      const worn = wornSlots.size;
+      const best = new Map(); // slot -> { item, alone }
+      for (const p of pieces) {
+        if (wornSlots.has(p.slot)) continue; // that slot already has a piece of it
+        const a = answers.get(p.uid);
+        const alone = (a?.version === c.version ? a.change : judgeNow(c, p)) ?? -Infinity;
+        if (!best.has(p.slot) || alone > best.get(p.slot).alone) best.set(p.slot, { item: p, alone });
+      }
+      const slots = [...best.keys()];
+      const bonusAt = new Set(def.bonuses.map((b) => b.pieces));
+      for (let mask = 1; mask < 1 << slots.length; mask++) {
+        const chosen = slots.filter((_, i) => mask & (1 << i)).map((sl) => best.get(sl));
+        if (chosen.length < 2 || !bonusAt.has(worn + chosen.length)) continue;
+        enqueue(`set:${plan}:${id}:${mask}`, (cc) => {
+          if (cc.version !== c.version) return; // judged with something else now: a new plan comes
+          const v = judgeGroup(cc, chosen.map((x) => x.item));
+          const alone = Math.max(...chosen.map((x) => x.alone));
+          if (v <= 0.005 || v <= alone + 0.005 || v <= (next.get(id)?.change ?? -Infinity)) return;
+          const items = chosen.map((x) => x.item);
+          const shop = items.filter((it) => !S.state.items.includes(it)).length; // to buy first
+          next.set(id, { set: id, name: def.name, items, worn, shop, pieces: worn + chosen.length, change: v });
+        });
+      }
+    }
+    enqueue(`sets:${plan}`, (cc) => {
+      if (cc.version !== c.version) return;
+      const list = [...next.values()].sort((a, b) => b.change - a.change);
+      const byUid = new Map();
+      for (const g of list) for (const it of g.items) if (!byUid.has(it.uid)) byUid.set(it.uid, g);
+      sets = { sig, list, byUid };
+    });
+  }
+  /** The sets worth putting on together, best first (the last answer until a new one is ready). */
+  function groups() {
+    const c = context();
+    const sig = setSig(c);
+    if (sets.sig !== sig && planned !== sig) {
+      planned = sig;
+      enqueue(`plan:${sig}`, (cc) => {
+        if (cc.version === c.version) planSets(cc, sig);
+        else planned = '';
+      });
+    }
+    return sets.list;
+  }
+
+  // ---------- The game's badges ----------
+  const pctText = (x) => `${x >= 0 ? '+' : ''}${Math.abs(x) >= 0.1 ? Math.round(x * 100) : (x * 100).toFixed(1)}%`;
+  const where = () => {
+    const t = (id, list) => list.find(([x]) => x === id)?.[1] ?? id;
+    const when = pick.time === 'any' && pick.weather === 'any' ? 'over a whole day of weather' : `in ${t(pick.time, TIMES).toLowerCase()}, ${t(pick.weather, WEATHER_PICKS).toLowerCase()}`;
+    const how = pick.activity === 'idle' ? 'fishing idle' : pick.activity === 'auto' ? `with the Auto-clicker on (${autoRate()}/s)` : pick.activity === 'chests' ? 'opening them' : 'clicking as you do now';
+    return `${when}, ${how}`;
+  };
+  /** What a change is for: your build, or the money and treasure your chests pay */
+  const aim = () => {
+    if (pick.activity !== 'chests') return 'your build';
+    const n = Object.values(S.state.chests ?? {}).reduce((t, x) => t + (x > 0 ? x : 0), 0);
+    return n ? `the money and treasure in your ${n} chest${n === 1 ? '' : 's'}` : 'the money and treasure in chests';
+  };
+  /** A cell's badge, as the game draws it (ui.js renderBagGear, renderMarket). */
+  const badgeHtml = (up) =>
+    up > 0.005
+      ? `<span class="upg up" title="Gear judge: ${pctText(up)} for ${aim()}, ${where()}">▲${pctText(up).replace('+', '')}</span>`
+      : up < -0.005
+        ? `<span class="upg down" title="Gear judge: ${pctText(up)} for ${aim()}, ${where()}">▼</span>`
+        : '';
+  /** A piece of a set worth putting on with others of it: the ▲ in the set colour, with the set's change. */
+  const setNote = (g) =>
+    `${pctText(g.change)} for ${aim()} with ${g.items.length === 2 ? 'both these' : `these ${g.items.length}`} ${g.name} pieces on together (its ${g.pieces}-piece bonus${g.worn ? `, with the ${g.worn} you wear` : ''}), ${where()}${g.shop ? `. ${g.shop === g.items.length ? 'All of them are' : g.shop === 1 ? '1 of them is' : `${g.shop} of them are`} in the Market: buy ${g.shop === 1 ? 'it' : 'them'} first` : ''}`;
+  const groupBadgeHtml = (g) => `<span class="upg up gj-set" style="color:${hex(SET_COLOR)}" title="Gear judge: ${setNote(g)}">▲${pctText(g.change).replace('+', '')}</span>`;
+  // A piece for a slot you have nothing in: always an upgrade, at once (with its change once it's judged)
+  const emptySlot = (item) => !S.state.equipped[item.slot] && S.canWear(item);
+  const emptyBadgeHtml = (item, up) =>
+    `<span class="upg up" title="Gear judge: your ${item.slot} slot is empty, so anything for it is an upgrade${up > 0.005 ? ` (${pctText(up)} for ${aim()}, ${where()})` : ''}">▲${up > 0.005 ? pctText(up).replace('+', '') : ''}</span>`;
+  function setBadge(cell, up, group, empty) {
+    if (up === undefined && !group && !empty) return; // not judged yet: the game's stays
+    const html = group && group.change > (up ?? 0) ? groupBadgeHtml(group) : empty ? emptyBadgeHtml(empty, up) : badgeHtml(up ?? 0);
+    const old = cell.querySelector(':scope > .upg');
+    if ((old?.outerHTML ?? '') === html) return;
+    if (old) old.remove();
+    if (!html) return;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    (cell.querySelector(':scope > .ilvl') ?? cell.firstElementChild)?.after(tpl.content.firstChild);
+  }
+  const layer = document.getElementById('windows');
+  function badges() {
+    if (!layer) return;
+    groups(); // a new plan, when the sets' pieces or what they're judged with changed
+    for (const cell of layer.querySelectorAll('.bag-cell[data-uid]')) {
+      if (cell.closest('#summary-panel')) continue; // Quicklinks draws its own
+      const item = S.itemByUid(cell.dataset.uid);
+      if (item?.slot) setBadge(cell, change(item), sets.byUid.get(item.uid), emptySlot(item) && item);
+    }
+    for (const cell of layer.querySelectorAll('.stall-cell[data-tip^="shop:"]')) {
+      if (cell.closest('#summary-panel')) continue;
+      const slot = S.state.shop?.stock?.[Number(cell.dataset.tip.slice(5))];
+      if (slot?.type === 'item') setBadge(cell, change(slot.item), sets.byUid.get(slot.item.uid), emptySlot(slot.item) && slot.item);
+    }
+  }
+  let frame = 0;
+  const later = () => {
+    if (!frame) frame = requestAnimationFrame(() => {
+      frame = 0;
+      badges();
+    });
+  };
+  const observer = new MutationObserver(later);
+  if (layer) observer.observe(layer, { childList: true, subtree: true });
+  addEventListener('idle-angler-gear-judge', later);
+
+  // ---------- For Quicklinks and Settings > Mods ----------
+  function setPick(next) {
+    pick = { ...pick, ...next };
+    try {
+      localStorage.setItem(TIME_KEY, pick.time);
+      localStorage.setItem(WEATHER_KEY, pick.weather);
+      localStorage.setItem(ACTIVITY_KEY, pick.activity);
+    } catch {
+      // storage blocked: the choice lasts until the page reloads
+    }
+    context();
+    queue.clear();
+    planned = '';
+    dispatchEvent(new Event('idle-angler-gear-judge'));
+  }
+  window.gearJudge = {
+    change,
+    groups,
+    groupOf: (uid) => sets.byUid.get(uid), // the set worth putting on that this piece is in, if any
+    setNote,
+    // For the console: the change for putting these pieces on together, e.g. gearJudge.tryTogether([a, b])
+    tryTogether: (items) => judgeGroup(context(), items),
+    get pick() {
+      return { ...pick };
+    },
+    setPick,
+    times: TIMES,
+    weathers: WEATHER_PICKS,
+    get activities() {
+      return activities();
+    },
+    where,
+    aim,
+    get pending() {
+      return queue.size;
+    },
+    get version() {
+      return context().version;
+    },
+  };
+  window.setGearJudge = setPick;
+  later();
+
+  window.stopGearJudge = () => {
+    clearTimeout(pump);
+    cancelAnimationFrame(frame);
+    observer.disconnect();
+    removeEventListener('idle-angler-gear-judge', later);
+    queue.clear();
+    delete window.gearJudge;
+    delete window.setGearJudge;
+    delete window.gearJudgeChoices;
+    delete window.stopGearJudge;
+    dispatchEvent(new Event('idle-angler-gear-judge')); // Quicklinks goes back to the game's measure
+  };
+  console.log('[gear judge] On: gear is judged over a whole day of weather (Settings > Mods). Turn it off with stopGearJudge()');
+};
+
+// =====================================================================================================
+// Shared by Quicklinks and the Left-hand layout: the camera and the big announcements centre on the part of
+// the scene you can see
+//
+// Out on the water the game's camera keeps your angler in the middle of the scene (scene.js followBoat), and
+// the big announcement for a rare catch ("Legendary!", scene.js announce) shows there too. With a side panel
+// out, these two keep the scene at its full size (so the game never lays it out again), and part of it is
+// under the panel or past the edge of the screen: the middle of the scene isn't the middle of what you see,
+// and the bigger the screen, the further off it is. While either of them is on, both aim for the middle of
+// the part you see instead (the camera easing over as it always does). Where the game's camera doesn't
+// follow the boat (moored at the Pond's pier, the cabin framed) it stays put. It only moves what you see:
+// nothing goes to the server.
+// One for the page (kept on window), so a second copy of this script doesn't wrap the game's methods twice.
+// =====================================================================================================
+const viewCentre = window.idleAnglerViewCentre ??= (() => {
+  const users = new Set();
+  const AIMED = ['followBoat', 'announce']; // the game's methods that aim for the middle of the screen
+  let proto = null, originals = null, probe = null, observer = null;
+  let share = 0.5; // where the middle of what you see is, as a share of the scene's width (the game's: half)
+  let stale = true;
+  const mark = () => { stale = true; };
+  // The part you see once the panels have finished sliding runs from the left panel's edge (--ll-push) to
+  // the right one's (--qs-push): the probe sits there, with no transition. The scene's left edge is always
+  // at the left end of it (the page moves over by as much), so the middle is half its width in
+  const measure = () => {
+    stale = false;
+    const seen = probe.getBoundingClientRect().width;
+    const whole = document.getElementById('game')?.clientWidth || innerWidth;
+    share = seen > 0 && whole > 0 ? Math.min(0.5, seen / 2 / whole) : 0.5;
+  };
+  // Each of these aims at the middle of the screen as L.SW / 2, and reads L.SW for nothing else: for the one
+  // call, the screen is made twice as wide as the middle of the part you see
+  const aimed = (original) => function (...args) {
+    if (stale) measure();
+    const L = this.L;
+    if (!L || share >= 0.5) return original.apply(this, args);
+    const sw = L.SW;
+    L.SW = sw * share * 2;
+    try { return original.apply(this, args); } finally { L.SW = sw; }
+  };
+  const install = async () => {
+    const { FishingScene } = await import(new URL('/src/scene.js', location.origin).href);
+    if (!users.size || proto) return; // turned off while the game's file loaded, or already on
+    proto = FishingScene.prototype;
+    originals = {};
+    for (const name of AIMED) {
+      originals[name] = proto[name];
+      proto[name] = aimed(originals[name]);
+    }
+    probe = document.createElement('div');
+    probe.id = 'ia-view-probe';
+    probe.style.cssText = 'position:fixed;top:0;height:0;left:var(--ll-push,0px);right:var(--qs-push,0px);visibility:hidden;pointer-events:none';
+    document.body.append(probe);
+    // The panels open and close with the page's classes (ll-open, qs-open), and the screen can change size
+    observer = new MutationObserver(mark);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    addEventListener('resize', mark);
+    stale = true;
+  };
+  return {
+    add(id) {
+      users.add(id);
+      stale = true;
+      if (!proto) install().catch((e) => console.warn('[view centre] The view stays as the game has it:', e));
+    },
+    remove(id) {
+      users.delete(id);
+      stale = true;
+      if (users.size || !proto) return;
+      for (const name of AIMED) proto[name] = originals[name];
+      observer.disconnect();
+      removeEventListener('resize', mark);
+      probe.remove();
+      proto = originals = probe = observer = null;
+      share = 0.5;
+    },
+    get share() { return share; }, // for the console: where the middle of what you see is (0.5 = the game's)
+  };
+})();
+
+// =====================================================================================================
 // Quicklinks (was summary-panel.js, the Summary panel)
 //
-// It adds a tab on the right edge of the page; click it to slide out a panel with what most needs you
-// right now. While the panel is out, the game shrinks to make room beside it (nothing is covered);
-// click the tab again to put it away. The panel shows:
+// It adds a second sidebar like the game's down the right edge, with a Quicklinks button. It slides out a panel, drawn as one of
+// the game's windows, with what most needs you right now. While the panel is out, the game's bars move over
+// to make room beside it (nothing is covered); the scene stays where it is at its full size, its right edge
+// under the panel (the catch feed and the right sail tab come in), so the view doesn't move about as it
+// slides; out on the water the camera eases your angler over to the middle of the part you see, and the
+// big announcements ("Legendary!") show there too. The button again, or the panel's ✕, puts it away. The panel shows:
 //  - At the top, the weather now (the forecast mod draws it; a click opens the forecast)
-//  - Per second: the income pills and Auto-click (that mod puts them here while both run), and between
+//  - Min-maxer: the income pills (that mod puts them here while both run), and under
 //    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
-//  - Character: your saved gear sets; click one to put it on, ⟳ saves what you're wearing over it,
-//    ✕ deletes it, and "+ Save what you're wearing" adds a new one (as in Angler > Character)
+//  - Builds: the 6 pieces of gear you're wearing (click one to take it off, as on the paper doll), then
+//    your saved gear sets; click one to put it on (its number key does too, with the build switcher on),
+//    ⟳ saves what you're wearing over it, ✕ deletes it, and "+ Save what you're wearing" adds a new one
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
-//  - Ascend: how many times you've ascended, progress toward the next ascension, the Ascend button,
-//    and the Oracle's "ascend for me"
+//  - Ascend: how many times you've ascended, progress toward the next ascension (or the Oracle's target),
+//    and the Oracle's "ascend for me" as buttons (Off, 1x-10x) beside the Ascend button
 //  - Foreman: the upgrade it buys next (as the Upgrades window draws it, with its buy button), and what
 //    it's buying (off, save up for the top of the list, or the next one you can afford)
 //  - Chests: how many you have, and Open all
-//  - Upgrades in your bag: only the gear that's better for your build than what you're wearing
+//  - Bag: how full your bag is, then only the gear that's better for your build than what you're wearing
+//    (by the Gear judge while it runs, with its time of day, weather and way of playing to pick above the list)
+//  - Market: what's on sale now (as Market & Bounties > Market draws it; a click buys), when new stock
+//    comes, and Restock
 // Every button and dropdown here is the game's own: the panel sits inside the game's window layer, so
 // a click runs exactly what the same button in the game's windows runs (the Ascend button asks first,
 // Open all shows what came out, a click on gear opens the game's Put on / Sell / Lock menu,
 // Ctrl-click sells and right-click locks, as in your bag). Each section's Open opens the game's
-// window for it; a click on its title (or ▾) collapses it, which this browser remembers. The panel takes the Altar's dark red look while you're in the basement.
+// window for it; a click on its title (or ▼) collapses it, which this browser remembers. The panel takes the Altar's black and crimson while you're in the basement.
 // Stop it (and remove the panel) with:  stopSummaryPanel(), or untick it in Settings > Mods
 // =====================================================================================================
 const summaryPanel = async () => {
   const mod = (path) => import(new URL(path, location.origin).href);
   const S = await mod('/src/state.js');
-  const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS, UPGRADE_BY_ID } = await mod('/src/data.js');
-  const { fmt, fmtHtml, fmtDecHtml, moneyHtml, hex } = await mod('/src/format.js');
+  const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS, UPGRADE_BY_ID, SLOT_BY_ID } = await mod('/src/data.js');
+  const { fmt, fmtHtml, fmtDecHtml, fmtOdds, money, moneyHtml, hex } = await mod('/src/format.js');
   const { GAIN_STATS, tenPercentPoints } = await mod('/src/minmax.js');
   const { describeBounty, bountyProgress, rewardTier } = await mod('/src/bounties.js');
   const { ICON_COLS, ICON_ROWS, ICON_INDEX } = await mod('/src/icon-index.js');
 
   window.stopSummaryPanel?.(); // replace one already running
+  // Two starts at once (the Mods checkbox and a paste, say) both find none running while the game's files
+  // load, so the newest one wins: each run has a token, and one that isn't the newest takes itself away
+  // (its timer would otherwise keep putting its sidebar back). Anything an older copy left goes too.
+  const run = {};
+  window.summaryPanelRun = run;
+  for (const id of ['qs-host', 'qs-hotbar', 'summary-style', 'qs-sidebar-style']) document.getElementById(id)?.remove();
+  viewCentre.add('quicklinks'); // the camera centres on the part of the scene you see
 
   // The game's window layer: its click and change handlers (ui.js onAction / onChangeInput) run every
   // data-action button and data-change dropdown inside it, so the panel lives in there
@@ -2084,17 +2501,28 @@ const summaryPanel = async () => {
   const lockNote = (id) =>
     `<button class="muted small-text locked-note goto" data-action="goto" data-panel="automation">🔒 Unlock <b>${esc(AUTOMATION_BY_ID[id]?.name ?? id)}</b> in Upgrades (${moneyHtml(AUTOMATION_BY_ID[id]?.cost ?? 0)}, kept for good) <span class="goto-arrow">→</span></button>`;
 
-  // ---------- Gear sets (as Angler > Character draws them) ----------
+  // ---------- Builds: the gear you're wearing and your gear sets (as Angler > Character draws them) ----------
+  // The 6 gear squares (ui.js slotCell): click one to take it off, as on the paper doll
+  const emptySlotArt = (slot) => gameIcon(`gear:${slot}:0`, 32) || `<span class="ui-icon" style="--icon:url(/assets/icons/ui/${SLOT_ICONS[slot]}.svg)"></span>`;
+  function slotCell(slotId) {
+    const item = S.itemByUid(S.state.equipped[slotId]);
+    const slot = SLOT_BY_ID[slotId];
+    if (!item) return `<div class="gear-slot empty" title="${esc(slot?.name ?? slotId)}: empty">${emptySlotArt(slotId)}<span class="slot-label">${esc(slot?.name ?? slotId)}</span></div>`;
+    return `<button class="gear-slot q${item.ancient ?? 0} ${item.set ? 'set' : ''}" style="--c:${itemColor(item)}" data-action="unequip" data-slot="${slotId}" data-tip="item:${item.uid}" aria-label="${esc(S.itemName(item))}">
+      ${itemArt(item)}<span class="ilvl">${item.ilvl ?? 1}</span></button>`;
+  }
   const priorityName = (key) => (key === 'gold' ? 'Income' : STATS[key]?.seekTier ? `${RARITIES[STATS[key].seekTier].name} odds` : STATS[key]?.name ?? key);
   function gearSetsHtml() {
     const st = S.state;
     const sets = st.gearSets ?? [];
+    const keys = window.buildSwitcherKeys ?? 0; // the build switcher's 1-5, while it runs
     const cells = sets.map((set, i) => {
       const pieces = Object.entries(set.items ?? {});
       const have = pieces.filter(([, uid]) => S.itemByUid(uid)).length;
       const wearing = pieces.length > 0 && pieces.every(([slot, uid]) => st.equipped[slot] === uid);
+      const key = i < keys ? `<kbd title="Press ${i + 1} to put this set on">${i + 1}</kbd>` : '';
       return `<div class="gearset">
-        <button class="btn small ${wearing ? 'primary' : ''}" data-action="gearset-equip" data-index="${i}" title="Put this set on${set.priority ? ` (and its build: ${esc(set.priority.length ? set.priority.map(priorityName).join(', ') : 'Income')})` : ''}">${esc(set.name)} <span class="muted">${have}/${pieces.length}</span></button>
+        <button class="btn small ${wearing ? 'primary' : ''}" data-action="gearset-equip" data-index="${i}" title="Put this set on${set.priority ? ` (and its build: ${esc(set.priority.length ? set.priority.map(priorityName).join(', ') : 'Income')})` : ''}${key ? ` · or press ${i + 1}` : ''}">${key}${esc(set.name)} <span class="muted">${have}/${pieces.length}</span></button>
         <button class="btn small icon-btn" data-action="gearset-save" data-index="${i}" title="Save what you're wearing as ${esc(set.name)}">⟳</button>
         <button class="btn small icon-btn" data-action="gearset-delete" data-index="${i}" title="Delete ${esc(set.name)}">✕</button>
       </div>`;
@@ -2102,6 +2530,7 @@ const summaryPanel = async () => {
     if (sets.length < GEAR_SETS.max) cells.push(`<button class="btn small" data-action="gearset-save" data-index="${sets.length}">+ Save what you're wearing</button>`);
     return `<div class="gearsets">${cells.join('')}</div>`;
   }
+  const buildsHtml = () => `<div class="qs-slots">${['rod', 'hook', 'reel', 'bait', 'line', 'charm'].map(slotCell).join('')}</div>${gearSetsHtml()}`;
 
   // ---------- Bounties (as the game's bounty board draws them) ----------
   const bountyBestZone = () => ZONES.filter((z) => S.state.zonesUnlocked.includes(z.id)).pop() ?? ZONES[0];
@@ -2147,21 +2576,35 @@ const summaryPanel = async () => {
   }
 
   // ---------- Ascend and the Oracle (as the Ascension window draws them) ----------
+  // The bar measures toward where the Oracle will ascend for you (its 1×-10×), or the requirement itself
+  // while it's off or not bought. Its choice is a row of buttons, one per multiple the game offers: each
+  // is the game's own auto-ascend control (data-change, the value the dropdown's option has), and a click
+  // on the lit one sends 0, the dropdown's "off" (onOracle, below, hands it to the game's change handler).
   function ascendHtml() {
     const st = S.state;
     const req = S.ascensionRequirement();
-    const progress = Math.min(1, st.runGold / req);
+    const oracle = S.hasAutomation('oracle');
+    const at = oracle ? st.settings.autoAscendAt : 0;
+    const target = req * (at || 1);
+    const progress = Math.min(1, st.runGold / target);
     const can = S.canAscend();
+    const goal = at ? `${moneyHtml(target)} <span class="muted">for the Oracle at ${at}×</span>` : `${moneyHtml(req)} needed`;
+    // Off, then 1x-10x: the game's dropdown's options (AUTO_ASCEND_AT), the one set lit
+    const choices = AUTO_ASCEND_AT.map((x) => {
+      const on = (st.settings.autoAscendAt ?? 0) === x;
+      const title = x ? `Ascend for me at ${x}× the requirement (${money(req * x)})` : "Don't ascend for me";
+      return `<button type="button" class="btn small ${on ? 'primary' : ''}" data-change="auto-ascend" value="${x}" aria-pressed="${on}" title="${title}">${x ? `${x}x` : 'Off'}</button>`;
+    }).join('');
+    const ascendBtn = (wide) => `<button class="btn primary ${wide ? 'wide' : 'qs-ascend'}" data-action="ascend" ${disabled(!can)}>
+        ${can ? `Ascend for +${fmtHtml(S.pendingEssence())} Essence` : `Ascend (${Math.min(100, (st.runGold / req) * 100).toFixed(1)}%)`}
+      </button>`;
     return `<div class="qs-asc-count">Ascensions: <b>${fmtHtml(st.ascension.count)}</b></div>
-      <div class="sub">Earned this run: <b>${moneyHtml(st.runGold)}</b> / ${moneyHtml(req)} needed</div>
+      <div class="sub">Earned this run: <b>${moneyHtml(st.runGold)}</b> / ${goal}</div>
       <div class="progress"><div style="width:${(progress * 100).toFixed(1)}%"></div></div>
-      <button class="btn primary wide" data-action="ascend" ${disabled(!can)}>
-        ${can ? `Ascend for +${fmtHtml(S.pendingEssence())} Essence` : `Ascend (${(progress * 100).toFixed(1)}%)`}
-      </button>
       ${
-        S.hasAutomation('oracle')
-          ? `<label class="setting-select">Oracle: ascend for me <select data-change="auto-ascend">${AUTO_ASCEND_AT.map((x) => `<option value="${x}" ${st.settings.autoAscendAt === x ? 'selected' : ''}>${x ? `at ${x}× the requirement` : 'off'}</option>`).join('')}</select></label>`
-          : lockNote('oracle')
+        oracle
+          ? `<div class="setting-select qs-oracle"><span>Oracle:</span><span class="qs-oracle-at">${choices}</span>${ascendBtn(false)}</div>`
+          : `${ascendBtn(true)}${lockNote('oracle')}`
       }`;
   }
 
@@ -2256,7 +2699,7 @@ const summaryPanel = async () => {
     const rows = top
       .map(({ stat, points, gain }) => `<tr data-tip="stat:${stat}"><td>${esc(STATS[stat]?.name ?? stat)}</td><td class="muted">+${fmtDecHtml(points)} pts</td><td><b>+${(gain * 100).toFixed(2)}%</b></td><td><span class="mm-bar"><i style="width:${((gain / best) * 100).toFixed(1)}%"></i></span></td></tr>`)
       .join('');
-    return `<table class="mm-table mm-gains"><tr><th>Best +10%</th><th>Bonus</th><th>Gold/s</th><th></th></tr>${rows}</table>`;
+    return `<table class="mm-table mm-gains"><tr><th>Best +10%</th><th>Bonus</th><th>Gold/min</th><th></th></tr>${rows}</table>`;
   }
 
   // ---------- Chests ----------
@@ -2286,74 +2729,276 @@ const summaryPanel = async () => {
   // The same test as the game's ▲ badge on Bags: loose gear you can wear that improves your build by
   // more than half a percent (S.upgradeValue). Worked out every 2 s, as the game does, or at once when
   // your gear, build or level changes.
+  // With the Gear judge on, its measure instead (over a whole day of weather, or the time, weather and way of
+  // playing picked above the list), and its answers as they come in. The Market section uses it too.
   const gear = { at: 0, sig: '', list: [] };
+  const judge = () => window.gearJudge;
   const gearSig = () =>
-    [S.state.player?.level, JSON.stringify(S.state.equipped), JSON.stringify(S.state.settings.buildPriority ?? []), S.looseGear().map((i) => i.uid + (i.locked ? 'L' : '')).join(',')].join('|');
+    [S.state.player?.level, JSON.stringify(S.state.equipped), JSON.stringify(S.state.settings.buildPriority ?? []), S.looseGear().map((i) => i.uid + (i.locked ? 'L' : '')).join(','), judge() ? `j${judge().version}:${judgeSeen}` : ''].join('|');
+  let judgeSeen = 0; // bumped as the judge's answers come in
+  const upgradeOf = (item) => (judge() ? judge().change(item) : S.upgradeValueOf(item).change);
   function upgrades() {
     const now = performance.now();
     const sig = gearSig();
     if (sig === gear.sig && now - gear.at < 2000) return gear.list;
     gear.at = now;
     gear.sig = sig;
+    // A piece for a slot you have nothing in is always an upgrade, whatever it adds: those come first
     gear.list = S.looseGear()
       .filter((i) => S.canWear(i))
-      .map((item) => ({ item, up: S.upgradeValue(item.uid).change }))
-      .filter((x) => x.up > 0.005)
-      .sort((a, b) => b.up - a.up || (b.item.ilvl ?? 0) - (a.item.ilvl ?? 0));
+      .map((item) => ({ item, up: judge() ? judge().change(item) : S.upgradeValue(item.uid).change, empty: !S.state.equipped[item.slot] }))
+      .filter((x) => x.empty || x.up > 0.005)
+      .sort((a, b) => b.empty - a.empty || (b.up ?? 0) - (a.up ?? 0) || (b.item.ilvl ?? 0) - (a.item.ilvl ?? 0));
     return gear.list;
+  }
+  // The Gear judge's time of day, weather and how you play, as three of the game's dropdowns
+  function judgePicker() {
+    const j = judge();
+    if (!j) return '';
+    const label = { time: 'Judge gear for this time of day', weather: 'Judge gear for this weather', activity: 'Judge gear for how you play: clicking as now, idle, or with the Auto-clicker; or for opening chests (the money and treasure in them)' };
+    const select = (kind, list, now) =>
+      `<select data-qs-judge="${kind}" aria-label="${label[kind]}" title="${label[kind]}">${list.map(([id, name]) => `<option value="${id}" ${id === now ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select>`;
+    return `<div class="setting-select qs-judge"><span>Upgrades For:</span>${select('time', j.times, j.pick.time)}${select('weather', j.weathers, j.pick.weather)}${j.activities ? select('activity', j.activities, j.pick.activity) : ''}</div>`;
+  }
+  // Its ▲: the change for your build; for a slot you have nothing in, ▲ alone until it adds over ½%
+  const emptyFor = (item) => S.canWear(item) && !S.state.equipped[item.slot];
+  const upBadge = (item, up) =>
+    up > 0.005
+      ? `<span class="upg up">▲${pctText(up).replace('+', '')}</span>`
+      : emptyFor(item)
+        ? `<span class="upg up" title="Your ${esc(SLOT_BY_ID[item.slot]?.name ?? item.slot)} slot is empty: anything for it is an upgrade">▲</span>`
+        : '';
+  // A piece in your bag, as Bags > Gear draws it (ui.js renderBagGear), with the badge given
+  function gearCell(item, badge) {
+    const inSet = S.inGearSet(item.uid);
+    const cls = [`q${item.ancient ?? 0}`, item.set ? 'set' : '', item.locked ? 'locked' : '', inSet ? 'in-set' : ''].join(' ');
+    return `<button class="bag-cell ${cls}" style="--c:${itemColor(item)}" data-action="bag-item" data-uid="${item.uid}" data-tip="item:${item.uid}" aria-label="${esc(S.itemName(item))}">
+      ${itemArt(item)}<span class="ilvl">${item.ilvl ?? 1}</span>${badge}${item.locked ? '<span class="lock" title="Locked">🔒</span>' : ''}${inSet ? '<span class="set-mark" title="In a saved gear set">◆</span>' : ''}</button>`;
+  }
+  // The Gear judge's sets worth putting on together: the set, how many pieces with the ones you wear, the
+  // change, and the pieces to put on (each the game's bag button: a click puts it on, as in Bags)
+  const setGroups = () => judge()?.groups?.() ?? [];
+  const setUpBadge = (g) => `<span class="upg up" style="color:${hex(SET_COLOR)}" title="${esc(judge().setNote(g))}">▲${pctText(g.change).replace('+', '')}</span>`;
+  function setsHtml() {
+    return setGroups()
+      .map((g) => {
+        const up = pctText(g.change).replace('+', '');
+        const badge = setUpBadge(g);
+        // A piece from the Market: its stall (a click buys it); one in your bag: its bag button (a click puts it on)
+        const stock = S.state.shop?.stock ?? [];
+        const cell = (it) => {
+          const i = stock.findIndex((x) => x.type === 'item' && x.item === it);
+          return i >= 0 ? stallCell(stock[i], i, badge) : gearCell(it, badge);
+        };
+        const what = g.shop ? `buy ${g.shop === g.items.length ? (g.shop === 2 ? 'both' : `all ${g.shop}`) : g.shop} from the Market${g.shop < g.items.length ? ', then put on these' : ' and put them on'}` : `put on these ${g.items.length}`;
+        return `<div class="qs-set-group" title="${esc(judge().setNote(g))}"><div class="qs-set-name"><b style="color:${hex(SET_COLOR)}">${esc(g.name)}</b>
+          <span class="muted small-text">${g.pieces} pieces${g.worn ? ` (${g.worn} on now)` : ''}: ${what}</span><b class="qs-set-up">▲${up}</b></div>
+          <div class="bag-grid">${g.items.map(cell).join('')}</div></div>`;
+      })
+      .join('');
+  }
+  // How full your bag is, as Bags counts it (its "Bag 34/40" tab): loose gear against the room you have.
+  // When it's full, gear you catch or are given is sold, and the Market sells you no more (state.js bagFull)
+  function bagHtml() {
+    const used = S.looseGear().length;
+    const room = S.inventorySize?.() ?? 0;
+    if (!room) return '';
+    const free = Math.max(0, room - used);
+    const full = free === 0;
+    const tight = !full && free <= Math.max(2, Math.ceil(room * 0.1));
+    const title = full
+      ? 'Your bag is full: gear you catch, open or are given is sold, and the Market can’t sell you any. Sell or salvage some to make room.'
+      : `${free} of ${room} spaces free in your bag`;
+    return `<div class="qs-bag ${full ? 'full' : tight ? 'tight' : ''}" title="${esc(title)}"><span>Bag ${used}/${room}</span>
+      <div class="progress"><div style="width:${Math.min(100, (used / room) * 100).toFixed(1)}%"></div></div><b>${full ? 'Full' : `${free} free`}</b></div>`;
   }
   function gearHtml() {
     const list = upgrades();
-    if (!list.length) return '<p class="muted small-text">Nothing in your bag beats what you’re wearing for your build.</p>';
-    const cells = list.slice(0, MAX_GEAR).map(({ item, up }) => {
-      const inSet = S.inGearSet(item.uid);
-      const cls = [`q${item.ancient ?? 0}`, item.set ? 'set' : '', item.locked ? 'locked' : '', inSet ? 'in-set' : ''].join(' ');
-      return `<button class="bag-cell ${cls}" style="--c:${itemColor(item)}" data-action="bag-item" data-uid="${item.uid}" data-tip="item:${item.uid}" aria-label="${esc(S.itemName(item))}">
-        ${itemArt(item)}<span class="ilvl">${item.ilvl ?? 1}</span><span class="upg up">▲${pctText(up).replace('+', '')}</span>${item.locked ? '<span class="lock" title="Locked">🔒</span>' : ''}${inSet ? '<span class="set-mark" title="In a saved gear set">◆</span>' : ''}</button>`;
-    });
+    const picker = bagHtml() + judgePicker();
+    const groups = setsHtml();
+    const waiting = judge()?.pending ? '<p class="muted small-text">Judging your gear…</p>' : '';
+    if (!list.length && !groups) return `${picker}${waiting || `<p class="muted small-text">Nothing in your bag beats what you’re wearing for ${esc(judge()?.aim?.() ?? 'your build')}.</p>`}`;
+    const cells = list.slice(0, MAX_GEAR).map(({ item, up }) => gearCell(item, upBadge(item, up)));
     const more = list.length > MAX_GEAR ? `<p class="muted small-text">…and ${list.length - MAX_GEAR} more in your bag</p>` : '';
-    return `<div class="bag-grid">${cells.join('')}</div>${more}<p class="muted small-text center">Click gear to put it on, sell or lock it · Ctrl-click sells · Right-click locks</p>`;
+    const grid = cells.length ? `${groups ? '<div class="qs-set-name"><b>One piece at a time</b></div>' : ''}<div class="bag-grid">${cells.join('')}</div>` : '';
+    return `${picker}${groups}${grid}${more}<p class="muted small-text center">Click gear to put it on, sell or lock it · Ctrl-click sells · Right-click locks</p>`;
   }
 
+  // ---------- The Market (as Market & Bounties > Market draws it, ui.js renderMarket) ----------
+  // What's on sale now, sold ones too, with when new stock comes and the Restock button. A click buys,
+  // as in the Market: the game's own buy (data-action="buy-shop", with the same index and want).
+  const goldAmt = (n) => `<span class="amt">${moneyHtml(n)}</span>`;
+  function marketHtml() {
+    const shop = S.state.shop;
+    if (!shop?.stock) return '<p class="muted small-text">The Market isn’t open here.</p>';
+    const reroll = S.shopRerollCost();
+    let html = `<div class="qs-market-head"><span class="muted small-text">New stock in ${duration(shop.refreshAt - Date.now())}</span>
+      <button class="btn small" data-action="reroll-shop" ${disabled(S.state.gold < reroll)}>Restock · ${goldAmt(reroll)}</button></div><div class="stall">`;
+    shop.stock.forEach((slot, i) => {
+      if (slot.type === 'item') {
+        const item = slot.item;
+        const up = upgradeOf(item) ?? 0;
+        const g = judge()?.groupOf?.(item.uid);
+        const badge = g && g.change > up ? setUpBadge(g) : emptyFor(item) || up > 0.005 ? upBadge(item, up) : up < -0.005 ? '<span class="upg down">▼</span>' : '';
+        html += stallCell(slot, i, badge);
+      } else {
+        html += stallCell(slot, i, '');
+      }
+    });
+    return `${html}</div>`;
+  }
+  // One of the Market's stalls, as renderMarket draws it: a click buys (the game's buy-shop, its index and want)
+  function stallCell(slot, i, badge) {
+    const afford = S.state.gold >= slot.price;
+    const want = esc(slot.type === 'item' ? `item:${slot.item.uid}` : `chest:${slot.zone}:${slot.tier}:${slot.price}`);
+    const buy = slot.sold ? '' : `data-action="buy-shop" data-index="${i}" data-want="${want}"`;
+    const price = slot.sold ? 'SOLD' : goldAmt(slot.price);
+    if (slot.type === 'item') {
+      const item = slot.item;
+      return `<button class="bag-cell stall-cell q${item.ancient ?? 0} ${item.set ? 'set' : ''} ${slot.sold ? 'sold' : afford ? 'can' : ''}" style="--c:${itemColor(item)}" ${buy} data-tip="shop:${i}" aria-label="${esc(S.itemName(item))}, ${slot.sold ? 'sold' : 'for ' + slot.price}">
+          ${itemArt(item)}<span class="ilvl">${item.ilvl ?? 1}</span>${badge}<span class="t-cost">${price}</span></button>`;
+    }
+    return `<button class="bag-cell stall-cell chest ${slot.sold ? 'sold' : afford ? 'can' : ''}" style="--c:${tierColor(slot.tier)}" ${buy} title="${esc(`${tierName(slot.tier)} Chest · ${fmtOdds(RARITIES[slot.tier].oneIn)} · ${ZONE_BY_ID[slot.zone]?.name ?? ''} · ${1 + Math.floor(slot.tier / 2)} loot roll${slot.tier >= 2 ? 's' : ''}`)}" aria-label="${tierName(slot.tier)} Chest">
+          ${chestIcon(slot.tier)}<span class="t-cost">${price}</span></button>`;
+  }
+  // The count by its title: how many are still for sale, and ▲ when one is an upgrade (the game's badge)
+  const marketCount = () => {
+    const left = (S.state.shop?.stock ?? []).filter((slot) => !slot.sold);
+    const up = left.some((slot) => slot.type === 'item' && (emptyFor(slot.item) || (upgradeOf(slot.item) ?? 0) > 0.005 || judge()?.groupOf?.(slot.item.uid)));
+    return left.length ? `${left.length} for sale${up ? ' · ▲' : ''}` : '';
+  };
+
+  // ---------- The sidebar's look: the game's own (#hotbar), copied ----------
+  // The game styles its sidebar by id (#hotbar, #actionbar), in many layers. Every rule for them in its
+  // stylesheet is copied here for the Quicklinks sidebar's ids, so it looks and opens exactly like the
+  // game's, and keeps doing so when the game restyles it. Rules that reach outside the sidebar (the
+  // windows' room beside it, the level and ascension bars, the collapse button) are left out.
+  const splitSelectors = (text) => {
+    const out = [];
+    let depth = 0;
+    let cur = '';
+    for (const ch of text) {
+      if (ch === '(' || ch === '[') depth++;
+      else if (ch === ')' || ch === ']') depth--;
+      if (ch === ',' && !depth) {
+        out.push(cur.trim());
+        cur = '';
+      } else cur += ch;
+    }
+    out.push(cur.trim());
+    return out;
+  };
+  const sidebarRule = (sel) => /#(hotbar|actionbar)(?![\w-])/.test(sel) && !/#windows|#xp-row|#asc-row|#hotbar-pin|:has\(/.test(sel);
+  const ourIds = (sel) => sel.replace(/#hotbar(?![\w-])/g, '#qs-hotbar').replace(/#actionbar(?![\w-])/g, '#qs-actionbar');
+  function copyRules(rules) {
+    let css = '';
+    for (const r of rules) {
+      if (r.selectorText !== undefined && r.style) {
+        const parts = splitSelectors(r.selectorText).filter(sidebarRule).map(ourIds);
+        if (parts.length) css += `${parts.join(',')}{${r.style.cssText}}\n`;
+      } else if (r.cssRules && r.conditionText !== undefined) {
+        const inner = copyRules(r.cssRules);
+        const at = r instanceof CSSMediaRule ? 'media' : r instanceof CSSSupportsRule ? 'supports' : null;
+        if (inner && at) css += `@${at} ${r.conditionText}{${inner}}\n`;
+      }
+    }
+    return css;
+  }
+  const sidebarStyle = document.createElement('style');
+  sidebarStyle.id = 'qs-sidebar-style';
+  for (const sheet of document.styleSheets) {
+    if (!sheet.href || new URL(sheet.href).origin !== location.origin) continue; // the game's own stylesheet
+    try {
+      sidebarStyle.textContent += copyRules(sheet.cssRules);
+    } catch {
+      // unreadable sheet: skipped
+    }
+  }
+  document.head.append(sidebarStyle);
+
   // ---------- Styles ----------
+  const RIBBON_RISE = 16; // the window's title ribbon rises 12px above its frame: the frame starts this far down
   const style = document.createElement('style');
   style.id = 'summary-style';
   style.textContent = `
 :root{--qs-w:min(${MIN_W}px,85vw)}
 body.qs-open #app{margin-right:var(--qs-w)}
-#app{transition:margin-right ${SLIDE_MS}ms ease-out}
+body.qs-open{--qs-push:var(--qs-w)}
+#app{transition:margin ${SLIDE_MS}ms ease-out}
+/* The scene keeps its full size while the page makes room (a window on the left, Quicklinks on the right):
+   it reaches past the page's right edge by however far the page is pushed, on the same timing, so the game
+   never lays it out again (that moves the whole view about). The catch feed and the right sail tab come
+   back in by as much, to stay on screen. The camera aims for the middle of the part you see (viewCentre).
+   Left-hand layout and Quicklinks both have this rule */
+#stage > #game{right:calc(-1 * (var(--ll-push, 0px) + var(--qs-push, 0px)));transition:right ${SLIDE_MS}ms ease-out}
+#scene-hud > .catch-feed{margin-right:calc(var(--ll-push, 0px) + var(--qs-push, 0px));transition:margin-right ${SLIDE_MS}ms ease-out}
+#scene-hud > .sail-arrow.right{margin-left:calc(-1 * (var(--ll-push, 0px) + var(--qs-push, 0px)))}
 body.qs-open .corner-btn,body.qs-open #bmc-wbtn{margin-right:var(--qs-w)}
-#summary-panel{position:fixed;top:0;right:0;bottom:0;width:var(--qs-w);box-sizing:border-box;z-index:1;display:flex;flex-direction:column;
-  pointer-events:auto;font-family:var(--font);font-size:calc(14px * var(--ui-scale,1));color:var(--text);
-  border:12px solid;border-image:url('/assets/ui/ornate/forest/panel_main_normal.png') 32 fill / 16px / 0 stretch;background:#1e2c21;background-clip:padding-box;
-  transform:translateX(100%);visibility:hidden;transition:transform ${SLIDE_MS}ms ease-out,visibility 0s linear ${SLIDE_MS}ms}
-body.qs-open #summary-panel{transform:none;visibility:visible;transition:transform ${SLIDE_MS}ms ease-out,visibility 0s}
-#qs-weather{flex:none;margin:2px 4px 6px;cursor:pointer}
+/* The panel is one of the game's windows (frame, ribbon, corners, glass), held at the right edge, full height */
+#windows #summary-panel.window{position:fixed;top:${RIBBON_RISE}px !important;right:0 !important;bottom:0 !important;left:auto !important;
+  width:var(--qs-w) !important;height:auto !important;max-height:none !important;margin:0;display:flex;flex-direction:column;z-index:1;
+  pointer-events:auto;transform:translateX(calc(100% + 16px));visibility:hidden;
+  transition:transform ${SLIDE_MS}ms ease-out,visibility 0s linear ${SLIDE_MS}ms}
+body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;transition:transform ${SLIDE_MS}ms ease-out,visibility 0s}
+/* The weather starts right under the header (the game leaves 30px above a window's contents when it has no tabs) */
+#summary-panel > .win-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding-top:0}
+#qs-weather{flex:none;margin:0 0 6px;cursor:pointer}
 #qs-weather:empty{display:none}
 #qs-weather .wf-now{margin:0}
 #qs-weather:hover .wf-now{filter:brightness(1.12)}
-#summary-panel .qs-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:2px 4px 8px}
+#summary-panel .qs-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 2px 8px}
 #summary-panel section{margin:0 0 10px}
-#summary-panel h3{display:flex;align-items:baseline;gap:8px;margin:6px 0 4px;padding:4px 8px;font-size:1em;color:var(--accent);
-  background:#17221a;box-shadow:inset 0 0 0 1px rgba(201,207,210,.14)}
-#summary-panel h3 .goto{margin-left:auto;font-size:.85em;font-weight:400}
-#summary-panel .qs-fold{display:inline-flex;align-items:baseline;gap:6px;padding:0;font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-#summary-panel .qs-chev{display:inline-block;width:1em;text-align:center;color:var(--muted);transition:transform .12s}
-#summary-panel .qs-fold:hover .qs-chev{color:var(--accent)}
-#summary-panel .qs-collapsed .qs-chev{transform:rotate(-90deg)}
+/* Section titles as the game draws a foldable section's heading (Settings > General): 13px, regular, in
+   the accent colour, with the same ▼ / ▶ marker */
+#summary-panel h3{display:flex;align-items:baseline;gap:8px;margin:2px 0 4px;padding:3px 0;font-size:13px;font-weight:400;color:var(--accent)}
+#summary-panel h3 .goto{margin-left:auto;font-size:.92em;font-weight:400}
+#summary-panel .qs-fold{display:inline-flex;align-items:baseline;gap:0;padding:0;font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+#summary-panel .qs-chev{display:list-item;list-style:disclosure-open inside;width:auto;font-size:inherit}
+#summary-panel .qs-collapsed .qs-chev{list-style-type:disclosure-closed}
 #summary-panel .qs-collapsed .qs-content{display:none}
 #summary-panel section.qs-collapsed{margin-bottom:4px}
-#summary-panel .qs-count{color:var(--muted);font-weight:400}
+#summary-panel .qs-count{color:var(--muted);font-weight:400;font-size:.85em}
 #summary-panel .bounties.list{margin:4px 0}
+/* Bounty rows, tighter than the game's: less padding and a slimmer progress bar */
+#summary-panel .bounty-row{padding-top:1px;padding-bottom:1px;min-height:0}
 #summary-panel .bounty-row .name{font-size:.95em}
+#summary-panel .bounty-row .bounty-bar{height:6px;margin:2px 0}
 #summary-panel .qs-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #summary-panel .row-main{min-width:0}
 #summary-panel .progress{margin:4px 0 6px}
 #summary-panel .qs-asc-count{margin:2px 0 4px}
+#summary-panel .qs-slots{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}
+#summary-panel .qs-slots .gear-slot{flex:none}
 #summary-panel .gearsets{justify-content:start;margin:4px 0}
+#summary-panel .gearset .btn kbd{margin-right:6px}
 #summary-panel .btn.wide{width:100%}
-#summary-panel .setting-select{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:6px 0 0;padding:6px 8px;background:#17221a;box-shadow:inset 0 0 0 1px rgba(201,207,210,.14)}
+#summary-panel .setting-select{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:6px 0 0}
 #summary-panel .setting-select select{flex:1 1 140px;min-width:0}
+#summary-panel .qs-oracle .qs-oracle-at{display:flex;gap:4px}
+/* One line: Oracle:, its multiples, then Ascend at the right end */
+#summary-panel .setting-select.qs-oracle{flex-wrap:nowrap;gap:4px 6px}
+#summary-panel .qs-oracle .qs-oracle-at .btn{min-width:32px;padding-left:6px;padding-right:6px}
+#summary-panel .qs-oracle .qs-ascend{margin-left:auto;white-space:nowrap}
+/* Market squares the size of the gear squares above (the game's stall stretches 6 across the width) */
+#summary-panel [data-qs="market"] .stall{grid-template-columns:repeat(auto-fill,58px);gap:6px}
+#summary-panel [data-qs="market"] .stall-cell.chest .icon{width:40px;height:40px}
+#summary-panel .qs-set-group{margin:2px 0 8px}
+#summary-panel .qs-set-name{display:flex;align-items:baseline;gap:6px;margin:4px 0 2px}
+#summary-panel .qs-set-name .qs-set-up{margin-left:auto;color:${hex(SET_COLOR)}}
+/* "Upgrades For:" on a line of its own, so the three dropdowns below it have the width to show their whole names */
+#summary-panel .setting-select.qs-judge{flex-wrap:wrap;gap:2px 8px;margin:2px 0 6px}
+#summary-panel .qs-judge > span{flex:1 0 100%}
+/* Bag space: Bag 34/40, a slim bar, and what's free (amber when nearly full, red when full) */
+#summary-panel .qs-bag{display:flex;align-items:center;gap:8px;margin:2px 0 6px;font-size:.9em}
+#summary-panel .qs-bag > span{color:var(--muted);white-space:nowrap}
+#summary-panel .qs-bag .progress{flex:1;height:6px;margin:0}
+#summary-panel .qs-bag b{white-space:nowrap}
+#summary-panel .qs-bag.tight .progress > div{background:#f59e0b}
+#summary-panel .qs-bag.tight b{color:#f59e0b}
+#summary-panel .qs-bag.full .progress > div{background:var(--danger,#ef4444)}
+#summary-panel .qs-bag.full b{color:var(--danger,#ef4444)}
+#summary-panel .qs-judge select{flex:1 1 0;min-width:0}
+#summary-panel .qs-market-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 6px}
 #summary-panel .locked-note{display:block;width:100%;margin-top:6px;text-align:left}
 #summary-panel p{margin:4px 0}
 #summary-panel .qs-chests{display:flex;align-items:center;gap:8px}
@@ -2361,65 +3006,63 @@ body.qs-open #summary-panel{transform:none;visibility:visible;transition:transfo
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
 #summary-panel .qs-next-up{margin:4px 0 0}
 #qs-pills:has(#measured-rate-wrap) .qs-pills-off{display:none}
-/* Top to bottom: the pills, the best +10%, Auto-click (the pills mod appends its two; this orders them) */
+/* Top to bottom: the pills, then the best +10% (the pills mod appends its pills; this orders them) */
 #qs-pills{display:flex;flex-direction:column}
 #qs-pills #measured-rate-wrap{order:1}
 #qs-pills .qs-gains{order:2;margin:2px 0}
-#qs-pills #measured-autoclick-wrap{order:3;align-self:flex-start}
 #summary-panel .mm-gains td:nth-child(4){width:35%}
-/* top: its bottom edge (it hangs up from it); placeTab sets it above the game's sidebar toolbar */
-#summary-tab{position:fixed;top:calc(50% - 70px);right:0;z-index:5;transform:translateY(-100%);display:flex;flex-direction:column;align-items:center;gap:6px;
-  min-width:0;padding:10px 0;letter-spacing:1px;transition:right ${SLIDE_MS}ms ease-out;
-  /* As wide as the game's side tabs to the next water (.sail-tab: 44px, zoomed by the text size) */
-  width:calc(44px * var(--ui-scale, 1));justify-content:center}
-/* Top to bottom: the arrow, the label (only it runs sideways), the bounty count. With the whole tab in vertical-rl,
-   flex's column axis ran across it and put the arrow beside the label */
-#summary-tab .qs-label{writing-mode:vertical-rl}
-body.qs-open #summary-tab{right:var(--qs-w)}
-/* The side tabs' chevron (.sail-chev): it points right as drawn, so it's flipped to point left while the panel is away */
-#summary-tab .qs-arrow{flex:none;width:10px;height:18px;background:var(--accent);-webkit-mask:url('/assets/icons/hud/chevron.svg') center / contain no-repeat;mask:url('/assets/icons/hud/chevron.svg') center / contain no-repeat;transform:scaleX(-1)}
-body.qs-open #summary-tab .qs-arrow{transform:none}
-#summary-tab .qs-dot{min-width:16px;padding:0 3px;font:700 11px/16px var(--font);text-align:center;color:#1b2a17;background:var(--accent);border-radius:8px}
-#summary-tab .qs-dot:empty{display:none}
-/* The basement: the Altar's black and crimson, as the game draws the Draconic Altar window */
-body[data-place='basement'] #summary-panel{border-image-source:url('/assets/ui/ornate/blood/panel_main_normal.png');background-color:#0a090a}
-body[data-place='basement'] #summary-panel :is(h3,.setting-select){background-color:#141012}
-body[data-place='basement'] #summary-panel .row{border-image-source:url('/assets/ui/ornate/blood/panel_slotdark_normal.png')}
-body[data-place='basement'] :is(#summary-panel,#summary-tab) .btn,body[data-place='basement'] #summary-tab{border-image-source:url('/assets/ui/ornate/blood/button_dark_normal.png')}
-body[data-place='basement'] :is(#summary-panel,#summary-tab) .btn:hover:not(:disabled),body[data-place='basement'] #summary-tab:hover{border-image-source:url('/assets/ui/ornate/blood/button_dark_hovered.png')}
-body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url('/assets/ui/ornate/blood/button_light_normal.png');color:#3a0d10}
-@media (prefers-reduced-motion:reduce){#app,#summary-panel,#summary-tab{transition:none}}`;
+/* The Quicklinks sidebar: the game's sidebar (rules copied above), down the right edge. placeBar sets its top */
+#qs-hotbar{left:auto !important;right:6px !important;bottom:auto !important}
+/* Its icon: a lightning bolt drawn like the game's sidebar icons (a filled shape on a 512 square, shown
+   through the same --icon mask, so it takes the buttons' colour and size) */
+#qs-hotbar #qs-toggle .qs-icon{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%23fff' d='M313 18 88 290h139l-50 204 247-288H285l60-188z'/%3E%3C/svg%3E")}
+/* Phones: the game hides its line map under an open window; the panel (always there, even put away) doesn't count */
+@media (max-width:640px){body:not(:has(#windows .window:not(#summary-panel))) #metro{visibility:visible}}
+@media (prefers-reduced-motion:reduce){#app,#stage > #game,#scene-hud > .catch-feed,#windows #summary-panel.window{transition:none}}`;
   document.head.append(style);
 
-  // ---------- The panel and its tab ----------
+  // ---------- The panel ----------
   const SECTIONS = [
-    // The income pills mod moves its pills and Auto-click into #qs-pills (it listens for idle-angler-quicklinks);
+    // The income pills mod moves its pills into #qs-pills (it listens for idle-angler-quicklinks);
     // this section draws only the best +10% (.qs-gains), which CSS orders between them
-    { id: 'stats', title: 'Per second', panel: 'minmax', html: gainsHtml },
-    { id: 'character', title: 'Character', panel: 'character', html: gearSetsHtml, count: () => `${(S.state.gearSets ?? []).length}/${GEAR_SETS.max} gear sets` },
+    { id: 'stats', title: 'Min-maxer', panel: 'minmax', html: gainsHtml },
+    { id: 'character', title: 'Builds', panel: 'character', html: buildsHtml, count: () => `${(S.state.gearSets ?? []).length}/${GEAR_SETS.max}` },
     { id: 'bounties', title: 'Bounties', panel: 'bounties', html: bountiesHtml, count: () => { const n = finishedBounties(); return n ? `${n} to claim` : ''; } },
     { id: 'ascend', title: 'Ascend', panel: 'ascend', html: ascendHtml },
     { id: 'foreman', title: 'Foreman', panel: 'automation', html: foremanHtml },
     { id: 'chests', title: 'Chests', panel: 'chests', html: chestsHtml },
-    { id: 'gear', title: 'Upgrades in your bag', panel: 'bags', html: gearHtml, count: () => { const n = upgrades().length; return n ? String(n) : ''; } },
+    { id: 'gear', title: 'Bag', panel: 'bags', html: gearHtml, count: () => { const n = upgrades().length; const g = setGroups().length; return [n ? String(n) : '', g ? `${g} set${g === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '); } },
+    { id: 'market', title: 'Market', panel: 'market', html: marketHtml, count: marketCount },
   ];
-  const panel = document.createElement('aside');
+  // A window as the game builds one (windows.js), without its undock / pin buttons or resize grip. It sits
+  // in a box of its own inside the window layer, so the game's buttons inside it work, while the layout
+  // mods (which look for the layer's own windows) leave it alone.
+  const host = document.createElement('div');
+  host.id = 'qs-host';
+  const panel = document.createElement('section');
   panel.id = 'summary-panel';
+  panel.className = 'window';
+  panel.setAttribute('role', 'complementary');
   panel.setAttribute('aria-label', 'Quicklinks');
   // The weather now, at the top above the sections: the forecast mod draws its now box into it (empty without it)
-  panel.innerHTML = `<div id="qs-weather" title="Open the forecast (W)"></div><div class="qs-body">${SECTIONS.map(
-    (s) => `<section data-qs="${s.id}"><h3><button type="button" class="qs-fold" aria-expanded="true" title="Collapse"><span class="qs-chev" aria-hidden="true">▾</span>${esc(s.title)}</button> <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
-  ).join('')}</div>`;
+  panel.innerHTML = `<header class="win-head"><div class="win-title"><h2>Quicklinks</h2></div><div class="win-tools"><button class="win-close" type="button" aria-label="Hide Quicklinks" title="Hide Quicklinks">✕</button></div></header>
+    <div class="win-body"><div id="qs-weather" title="Open the forecast (W)"></div><div class="qs-body">${SECTIONS.map(
+      (s) => `<section data-qs="${s.id}"><h3><button type="button" class="qs-fold" aria-expanded="true" title="Collapse"><span class="qs-chev" aria-hidden="true"></span>${esc(s.title)}</button> <span class="qs-count"></span><button class="goto" data-action="goto" data-panel="${s.panel}" title="Open the game's window for this">Open <span class="goto-arrow">→</span></button></h3><div class="qs-content"></div></section>`,
+    ).join('')}</div></div>
+    <i class="win-corner tl"></i><i class="win-corner tr"></i><i class="win-corner bl"></i><i class="win-corner br"></i>`;
   const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
   pillsHost.id = 'qs-pills';
-  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them and Auto-click here.</p><div class="qs-gains"></div>';
+  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them here.</p><div class="qs-gains"></div>';
   panel.querySelector('[data-qs="stats"] .goto').title = 'Open the Min-maxer';
-  layer.append(panel);
+  host.append(panel);
+  layer.append(host);
   dispatchEvent(new Event('idle-angler-quicklinks'));
   const parts = SECTIONS.map((s) => {
     const el = panel.querySelector(`[data-qs="${s.id}"]`);
     return { ...s, el, content: el.querySelector('.qs-gains') ?? el.querySelector('.qs-content'), countEl: el.querySelector('.qs-count'), last: null, lastCount: null };
   });
+  const onClose = () => setOpen(false);
+  panel.querySelector('.win-close').addEventListener('click', onClose);
 
   // ---------- Collapsing a section ----------
   // A collapsed section keeps its title, count and Open; its contents aren't drawn until it's opened again
@@ -2453,15 +3096,66 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     setTimeout(render, 0);
   };
   panel.addEventListener('click', onFold);
+  // The Oracle's 1x-10x buttons: a click hands the button (its data-change and value, as the dropdown's
+  // option would have them) to the game's own change handler on the window layer
+  const onOracle = (e) => {
+    const btn = e.target.closest('.qs-oracle [data-change="auto-ascend"]');
+    if (btn) btn.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  panel.addEventListener('click', onOracle);
+  // The Gear judge's time of day and weather (not the game's: no data-change, so its handler leaves them be)
+  const onJudgePick = (e) => {
+    const sel = e.target.closest('select[data-qs-judge]');
+    if (!sel) return;
+    sel.blur();
+    window.gearJudge?.setPick({ [sel.dataset.qsJudge]: sel.value });
+  };
+  panel.addEventListener('change', onJudgePick);
 
-  const tab = document.createElement('button');
-  tab.type = 'button';
-  tab.id = 'summary-tab';
-  tab.className = 'btn';
-  tab.setAttribute('aria-controls', 'summary-panel');
-  tab.innerHTML = '<span class="qs-arrow" aria-hidden="true"></span><span class="qs-label">Quicklinks</span><span class="qs-dot" title="Bounties to claim"></span>';
-  document.body.append(tab);
-  const dot = tab.querySelector('.qs-dot');
+  // ---------- The Quicklinks sidebar ----------
+  // A second sidebar like the game's, down the right edge: the Quicklinks button (it slides the panel out
+  // and back; its badge counts bounties to claim).
+  const stage = document.getElementById('stage') ?? app;
+  const bar = document.createElement('div');
+  bar.id = 'qs-hotbar';
+  bar.innerHTML = `<nav id="qs-actionbar" aria-label="Quicklinks"><div class="ab-group">
+      <button type="button" class="action-btn" id="qs-toggle" aria-controls="summary-panel"><span class="ui-icon qs-icon"></span><span class="ab-label">Quicklinks</span><span class="badge"></span></button>
+    </div></nav>`;
+  stage.append(bar);
+  const toggle = bar.querySelector('#qs-toggle');
+  const dot = toggle.querySelector('.badge');
+  toggle.addEventListener('click', () => setOpen(!isOpen));
+  // The game's sidebar opens while the pointer is over it, or stays open (its Collapse / Expand): this one too
+  const onEnter = () => bar.classList.add('hovering');
+  const onLeave = () => bar.classList.remove('hovering');
+  bar.addEventListener('pointerenter', onEnter);
+  bar.addEventListener('pointerleave', onLeave);
+  function syncBar() {
+    const main = document.getElementById('hotbar');
+    bar.classList.toggle('pinned', Boolean(main?.classList.contains('pinned')));
+    placeBar();
+  }
+  // Where it sits: level with the game's sidebar when that's on the left (the Left-hand layout), else just
+  // under it. Both bars move with the play area, which narrows while the panel is out.
+  function placeBar() {
+    const main = document.getElementById('hotbar');
+    const nav = main?.querySelector('#actionbar');
+    const s = stage.getBoundingClientRect();
+    const r = (nav ?? main)?.getBoundingClientRect();
+    let top = 58;
+    if (r?.height) top = r.left > s.left + s.width / 2 ? main.getBoundingClientRect().bottom - s.top + 10 : r.top - s.top;
+    const px = `${Math.round(top)}px`;
+    if (bar.style.top !== px) bar.style.top = px;
+  }
+  const barObserver = new MutationObserver(syncBar);
+  const watchBars = () => {
+    barObserver.disconnect();
+    const main = document.getElementById('hotbar');
+    if (main) barObserver.observe(main, { attributes: true, attributeFilter: ['class', 'style'], subtree: true, childList: true, characterData: true });
+  };
+  watchBars();
+  syncBar();
+  addEventListener('resize', placeBar);
 
   // ---------- Keeping it current ----------
   // Redrawn when the game's state changes (at most every 300 ms) and once a second for the timers. A
@@ -2472,8 +3166,17 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   let pending = 0;
   function render() {
     pending = 0;
+    if (window.summaryPanelRun !== run) return stop(); // a newer copy runs now
     const done = finishedBounties();
     if (dot.textContent !== (done ? String(done) : '')) dot.textContent = done ? String(done) : '';
+    if (!bar.isConnected) stage.append(bar);
+    syncBar();
+    // In the basement, the Altar's black and crimson, as the game draws the Draconic Altar window
+    const altar = document.body.dataset.place === 'basement';
+    if (altar !== (panel.dataset.win === 'draconic')) {
+      if (altar) panel.dataset.win = 'draconic';
+      else delete panel.dataset.win;
+    }
     if (!isOpen || pressing) return;
     const focused = document.activeElement;
     for (const p of parts) {
@@ -2517,6 +3220,12 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     if (!pending) pending = setTimeout(render, 300);
   };
   const unsubscribe = S.onChange(schedule);
+  // The Gear judge's answers coming in (or it starting or stopping): the gear and the Market again
+  const onJudge = () => {
+    judgeSeen++;
+    schedule();
+  };
+  addEventListener('idle-angler-gear-judge', onJudge);
   const timer = setInterval(render, 1000);
   const onPress = () => { pressing = true; };
   const onRelease = () => {
@@ -2544,9 +3253,10 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   function setOpen(open, { remember = true } = {}) {
     isOpen = open;
     document.body.classList.toggle('qs-open', open);
-    tab.setAttribute('aria-expanded', String(open));
-    tab.setAttribute('aria-label', open ? 'Hide Quicklinks' : 'Show Quicklinks');
-    tab.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, the best +10%, gear sets, bounties, ascending, Foreman, chests and gear upgrades';
+    toggle.classList.toggle('active', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.setAttribute('aria-label', open ? 'Hide Quicklinks' : 'Show Quicklinks');
+    toggle.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, the best +10%, builds, bounties, ascending, Foreman, chests and gear upgrades';
     panel.inert = !open;
     if (remember) {
       try {
@@ -2558,27 +3268,6 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
     if (open) render();
     relayout();
   }
-  tab.addEventListener('click', () => setOpen(!isOpen));
-
-  // Since the game's UI update its toolbar (#hotbar) is a slim strip down the right edge, hanging above the
-  // waterline, so the tab sits 10px above it (its top moves with the water and the number of buttons). It
-  // never goes up into the top bar or the zone map strip. Where the toolbar isn't that strip (other screen
-  // sizes, older layouts), the tab stays where the CSS puts it.
-  function placeTab() {
-    const bar = document.getElementById('hotbar');
-    const r = bar?.getBoundingClientRect();
-    const right = app.getBoundingClientRect().right; // the game's right edge (the panel takes room beside it)
-    if (!r?.height || r.width > 200 || right - r.right > 60) {
-      if (tab.style.top) tab.style.top = '';
-      return;
-    }
-    const roof = Math.max(...['topbar', 'zonemap'].map((id) => document.getElementById(id)?.getBoundingClientRect().bottom ?? 0)) + 8;
-    const top = `${Math.round(Math.max(roof + tab.offsetHeight, r.top - 10))}px`; // its bottom edge: it hangs up from there
-    if (tab.style.top !== top) tab.style.top = top;
-  }
-  const tabTimer = setInterval(placeTab, 500);
-  addEventListener('resize', placeTab);
-  placeTab();
 
   let startOpen = false;
   try {
@@ -2589,26 +3278,753 @@ body[data-place='basement'] #summary-panel .btn.primary{border-image-source:url(
   setOpen(startOpen, { remember: false });
   render();
 
-  window.stopSummaryPanel = () => {
+  let stopped = false;
+  function stop() {
+    if (stopped) return;
+    stopped = true;
     unsubscribe?.();
     clearInterval(timer);
     clearTimeout(pending);
     cancelAnimationFrame(slideFrame);
     removeEventListener('pointerup', onRelease);
     removeEventListener('pointercancel', onRelease);
-    panel.removeEventListener('click', onFold);
-    clearInterval(tabTimer);
-    removeEventListener('resize', placeTab);
+    removeEventListener('resize', placeBar);
+    removeEventListener('idle-angler-gear-judge', onJudge);
+    barObserver.disconnect();
+    host.remove();
+    bar.remove();
+    style.remove();
+    sidebarStyle.remove();
+    if (window.stopSummaryPanel === stop) delete window.stopSummaryPanel;
+    if (window.summaryPanelRun !== run) return; // a newer copy has the page now: leave the rest to it
+    delete window.summaryPanelRun;
+    viewCentre.remove('quicklinks');
     document.body.classList.remove('qs-open');
     document.documentElement.style.removeProperty('--qs-w');
-    panel.remove();
-    dispatchEvent(new Event('idle-angler-quicklinks')); // the pills and Auto-click go back to the top bar
-    tab.remove();
-    style.remove();
+    dispatchEvent(new Event('idle-angler-quicklinks')); // the pills go back to the top bar
     dispatchEvent(new Event('resize'));
-    delete window.stopSummaryPanel;
+  }
+  window.stopSummaryPanel = stop;
+  console.log('[quicklinks] On: its sidebar is on the right edge. Turn it off with stopSummaryPanel()');
+};
+
+// =====================================================================================================
+// Left-hand layout
+//
+// It changes the game's new sidebar layout:
+//  - the sidebar (window buttons, Level and Ascension bars) sits down the left edge instead of the right
+//  - a window slides out from the left edge of the screen, and the game moves over to make room for it
+//    (nothing is covered), like Quicklinks does on the right. The scene slides over whole, at its full size,
+//    so your angler stays in view, out past the window: its right edge goes off the screen while the window
+//    is open (the catch feed and the right sail tab come back in, to stay on screen; Quicklinks keeps the
+//    scene whole the same way). Out on the water the camera centres your angler on the part you see, and the big announcements
+//    ("Legendary!") show there too. A narrower picture
+//    would have the game lay its scene out again for the new width, which moves the whole view about on
+//    every frame of the slide. One window shows at a time: opening
+//    another swaps it in. Close it (✕, Esc or its button again) and the game slides back.
+//    A window you undock floats over the game as before, and one you've pinned opens in its spot. The
+//    Weather forecast mod's window slides out here too.
+//  - Upgrades and Perks list every card on one page instead of five at a time
+// Everything inside the windows is still the game's own: only where they sit changes.
+// On a narrow screen (720px or less) the game's own phone layout is left alone.
+// Stop it (and put the game's layout back) with:  stopLeftLayout(), or untick it in Settings > Mods
+// =====================================================================================================
+const leftLayout = async () => {
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const S = await mod('/src/state.js');
+  const { UPGRADES, PERKS, STATS } = await mod('/src/data.js');
+  const { fmtHtml, fmtDecHtml, moneyHtml } = await mod('/src/format.js');
+  const { ICON_COLS, ICON_ROWS, ICON_INDEX } = await mod('/src/icon-index.js');
+
+  window.stopLeftLayout?.(); // replace one already running
+  viewCentre.add('leftLayout'); // the camera centres on the part of the scene you see
+
+  const layer = document.getElementById('windows');
+  const hotbar = document.getElementById('hotbar');
+  if (!layer || !hotbar) return console.warn('[left layout] The game page was not found (#windows, #hotbar)');
+
+  const WIDTH = 380; // the slideout (px); a window's contents never grow past their normal size, so it shows more
+  const SLIDE_MS = 180;
+  const RIBBON_RISE = 16; // where the frame starts (px): a window's title ribbon rises 12px above it, so the ribbon's top is 4px down
+  const WIDE = '(min-width: 721px)'; // the game's own break: below it, a window fills the phone's screen
+
+  // ---------- Styles ----------
+  const style = document.createElement('style');
+  style.id = 'left-layout-style';
+  style.textContent = `
+:root{--ll-w:${WIDTH}px}
+#app{transition:margin ${SLIDE_MS}ms ease-out}
+/* The scene keeps its full size while the page makes room (a window on the left, Quicklinks on the right):
+   it reaches past the page's right edge by however far the page is pushed, on the same timing, so the game
+   never lays it out again (that moves the whole view about). The catch feed and the right sail tab come
+   back in by as much, to stay on screen. The camera aims for the middle of the part you see (viewCentre).
+   Left-hand layout and Quicklinks both have this rule */
+#stage > #game{right:calc(-1 * (var(--ll-push, 0px) + var(--qs-push, 0px)));transition:right ${SLIDE_MS}ms ease-out}
+#scene-hud > .catch-feed{margin-right:calc(var(--ll-push, 0px) + var(--qs-push, 0px));transition:margin-right ${SLIDE_MS}ms ease-out}
+#scene-hud > .sail-arrow.right{margin-left:calc(-1 * (var(--ll-push, 0px) + var(--qs-push, 0px)))}
+@media ${WIDE}{
+  body.ll-open #app{margin-left:var(--ll-w)}
+  body.ll-open{--ll-push:var(--ll-w)}
+  /* The sidebar: down the left edge, opening rightwards. Mirrored: the icons keep to the edge (the slim strip
+     shows them), the names open to their right with the hotkey at the end, the active line is on the left,
+     and Collapse points left */
+  body #stage #hotbar{left:6px;right:auto}
+  body #hotbar #actionbar .action-btn{justify-content:flex-start}
+  body #hotbar #actionbar .action-btn :is(.gicon,.ui-icon){order:-3}
+  body #hotbar #actionbar .action-btn .ab-label{text-align:left}
+  body #hotbar:is(.hovering,.pinned,:focus-within) #actionbar .action-btn .ab-label{margin-right:0;margin-left:8px}
+  body #hotbar #actionbar .action-btn kbd{order:1;margin-right:0;margin-left:8px}
+  body #hotbar #actionbar .action-btn.active{box-shadow:inset 2px 0 0 var(--gold)}
+  body #hotbar-pin{flex-direction:row-reverse}
+  body #hotbar-pin svg{transform:scaleX(-1)}
+  body #hotbar-pin[aria-pressed='true'] svg{transform:none}
+  /* The zone arrows trade places with it: the left one clears the sidebar, the right one sits at the edge */
+  body #scene-hud > .sail-arrow.left{transform:translate(52px,-50%)}
+  body #scene-hud > .sail-arrow.right{transform:translate(calc(-100% - 6px),-50%)}
+  /* A docked window: the slideout, against the left edge, down to the bottom of the page. Its frame starts
+     just low enough for the title ribbon to rise over the top border as it always does, its top at the top
+     of the page. The forecast mod's window (kept in the page, hidden, while it's closed) joins in when it shows */
+  body #windows > .window:not(.floating):not([hidden]){position:fixed;left:0 !important;right:auto !important;top:${RIBBON_RISE}px !important;bottom:0 !important;
+    width:var(--ll-w) !important;height:auto !important;max-height:none !important;transition:none;animation:ll-slide ${SLIDE_MS}ms ease-out}
+  body #windows > .window:not(.floating) .win-resize{display:none}
+}
+@keyframes ll-slide{from{transform:translateX(-100%)}}
+@media (prefers-reduced-motion:reduce){#app,#stage > #game,#scene-hud > .catch-feed{transition:none}body #windows > .window:not(.floating){animation:none}}`;
+  document.head.append(style);
+
+  const wide = matchMedia(WIDE);
+  const docked = () => [...layer.querySelectorAll(':scope > .window:not(.floating):not([hidden])')];
+
+  // ---------- The slideout ----------
+  // The game measures its play area on window resize (Pixi, the window row, the sidebar), so a resize is
+  // sent on every frame while the page slides, and once more at the end.
+  let slideFrame = 0;
+  function relayout() {
+    cancelAnimationFrame(slideFrame);
+    const t0 = performance.now();
+    const step = () => {
+      dispatchEvent(new Event('resize'));
+      if (performance.now() - t0 < SLIDE_MS + 40) slideFrame = requestAnimationFrame(step);
+    };
+    slideFrame = requestAnimationFrame(step);
+  }
+
+  // One docked window at a time: the newest stays, the others close through their own ✕ (the game's
+  // close, so it forgets them the way it always does). The order they joined in is kept here.
+  const joined = new Map(); // window element -> when it last became docked
+  let tick = 0;
+  let isOpen = false;
+  function sync() {
+    for (const el of [...joined.keys()]) if (!el.isConnected || el.classList.contains('floating') || el.hidden) joined.delete(el);
+    for (const el of docked()) if (!joined.has(el)) joined.set(el, ++tick);
+    if (wide.matches) {
+      const list = [...joined].sort((a, b) => b[1] - a[1]).map(([el]) => el);
+      for (const el of list.slice(1)) el.querySelector('.win-close')?.click();
+    }
+    const open = wide.matches && docked().length > 0;
+    if (open !== isOpen) {
+      isOpen = open;
+      document.body.classList.toggle('ll-open', open);
+      relayout();
+    }
+  }
+
+  // ---------- Upgrades and Perks on one page ----------
+  // The game draws five cards and a pager (ui.js renderUpgrades / renderPerks). Each time it draws one, the
+  // five are swapped for every card, drawn the way the game draws them (copies of its helpers below), and
+  // the pager goes. The cards are the game's own buttons (buy-upgrade, buy-perk).
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  function gameIcon(key, size = 32) {
+    const i = ICON_INDEX[key];
+    if (i === undefined) return '';
+    return `<span class="gicon s${size}" style="background-image:url(/assets/icons/raven-${size}.png);background-size:${ICON_COLS * size}px ${ICON_ROWS * size}px;background-position:-${(i % ICON_COLS) * size}px -${Math.floor(i / ICON_COLS) * size}px" aria-hidden="true"></span>`;
+  }
+  const rowIcon = (key, letter, color) => {
+    const img = gameIcon(key);
+    return img ? `<span class="icon has-img">${img}</span>` : `<span class="icon" style="--c:${color}">${esc(letter)}</span>`;
   };
-  console.log('[quicklinks] On: the Quicklinks tab is on the right edge. Turn it off with stopSummaryPanel()');
+  const goldAmt = (n) => `<span class="amt">${moneyHtml(n)}</span>`;
+  const essenceAmt = (n) => `<span class="amt essence-text"><span class="essence-gem sm"></span><span>${fmtHtml(n)}</span></span>`;
+  function effectText(def, level) {
+    const info = STATS[def.stat];
+    if (def.type === 'mult') return `×${fmtDecHtml(def.perLevel)} ${info.name} per level · now ×${fmtDecHtml(S.leveledEffect(def, level))}`;
+    return `+${fmtDecHtml(def.perLevel)}${info.unit} ${info.name} per level · now +${fmtDecHtml(S.leveledEffect(def, level))}${info.unit}`;
+  }
+  function milestoneStar(def, level) {
+    const next = S.nextMilestone(def, level);
+    if (!next) return '';
+    return `<span class="ms-star" title="Lv ${next}: +${Math.round((def.milestone - 1) * 100)}% of its effect again (${next - level} to go)">★ ${next}</span>`;
+  }
+  const ranksHtml = (def, level) =>
+    def.maxLevel <= 10
+      ? Array.from({ length: def.maxLevel }, (_, i) => `<i class="pip ${i < level ? 'on' : ''}"></i>`).join('')
+      : `<span class="rank-bar"><span style="width:${Math.round((level / def.maxLevel) * 100)}%"></span></span>`;
+  function upgradeCards() {
+    const discount = S.upgradeDiscount();
+    return UPGRADES.filter((u) => S.upgradeLevel(u.id) < u.maxLevel)
+      .map((up) => {
+        const level = S.upgradeLevel(up.id);
+        const maxed = level >= up.maxLevel;
+        const plan = S.purchasePlan(up, level, S.state.gold, discount);
+        return `
+      <button class="boon ${maxed ? 'max' : plan.affordable ? 'can' : ''}" data-action="buy-upgrade" data-id="${up.id}" data-tip="upg:${up.id}">
+        ${rowIcon(`up:${up.id}`, up.type === 'mult' ? '×' : '+', up.type === 'mult' ? '#f472b6' : '#38bdf8')}
+        <span class="boon-main">
+          <span class="name">${esc(up.name)} <span class="muted">${level}/${up.maxLevel}</span> ${milestoneStar(up, level)}</span>
+          <span class="sub">${effectText(up, level)}</span>
+          <span class="ranks">${ranksHtml(up, level)}</span>
+        </span>
+        <span class="boon-cost">${maxed ? 'MAX' : `${plan.n > 1 ? `+${plan.n} · ` : ''}${goldAmt(plan.cost)}`}</span>
+      </button>`;
+      })
+      .join('');
+  }
+  function perkCards() {
+    const asc = S.state.ascension;
+    return PERKS.filter((p) => S.perkLevel(p.id) < p.maxLevel)
+      .map((perk) => {
+        const level = S.perkLevel(perk.id);
+        const maxed = level >= perk.maxLevel;
+        const plan = S.purchasePlan(perk, level, asc.essence, 1, 1);
+        const desc = perk.stat ? effectText(perk, level) : perk.desc;
+        return `
+      <button class="boon ${maxed ? 'max' : plan.affordable ? 'can' : ''}" data-action="buy-perk" data-id="${perk.id}" data-tip="perk:${perk.id}">
+        ${rowIcon(`perk:${perk.id}`, '✦', '#a78bfa')}
+        <span class="boon-main">
+          <span class="name">${esc(perk.name)} <span class="muted">${level}/${perk.maxLevel}</span></span>
+          <span class="sub">${desc}</span>
+          <span class="ranks">${ranksHtml(perk, level)}</span>
+        </span>
+        <span class="boon-cost">${maxed ? 'MAX' : essenceAmt(plan.cost)}</span>
+      </button>`;
+      })
+      .join('');
+  }
+  const PAGED = [
+    { pager: 'upgrade-page', card: 'buy-upgrade', cards: upgradeCards },
+    { pager: 'perk-page', card: 'buy-perk', cards: perkCards },
+  ];
+  // Where each window's list was scrolled to: the game's redraw puts five cards back first, which cuts the
+  // scroll short before the full list returns
+  const scrolled = new WeakMap();
+  const onScroll = (e) => {
+    if (e.target.classList?.contains('win-body')) scrolled.set(e.target, e.target.scrollTop);
+  };
+  layer.addEventListener('scroll', onScroll, true);
+  function unpage() {
+    for (const kind of PAGED) {
+      for (const btn of layer.querySelectorAll(`.pager [data-action="${kind.pager}"]`)) {
+        const pager = btn.closest('.pager');
+        if (!pager?.isConnected) continue;
+        const list = pager.parentElement;
+        const body = pager.closest('.win-body');
+        const old = [...list.querySelectorAll(`:scope > .boon[data-action="${kind.card}"]`)];
+        let html;
+        try {
+          html = kind.cards();
+        } catch (err) {
+          console.warn('[left layout] Could not list every card; leaving the pages', err);
+          continue;
+        }
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html;
+        (old[0] ?? pager).before(tpl.content);
+        for (const el of old) el.remove();
+        pager.remove();
+        if (body && scrolled.has(body)) body.scrollTop = scrolled.get(body);
+      }
+    }
+  }
+
+  // ---------- Watching the windows ----------
+  const observer = new MutationObserver(() => {
+    unpage();
+    sync();
+  });
+  observer.observe(layer, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+  const onMedia = () => {
+    sync();
+    relayout();
+  };
+  wide.addEventListener('change', onMedia);
+  unpage();
+  sync();
+  relayout();
+
+  window.stopLeftLayout = () => {
+    observer.disconnect();
+    wide.removeEventListener('change', onMedia);
+    layer.removeEventListener('scroll', onScroll, true);
+    cancelAnimationFrame(slideFrame);
+    document.body.classList.remove('ll-open');
+    style.remove();
+    viewCentre.remove('leftLayout');
+    dispatchEvent(new Event('resize'));
+    delete window.stopLeftLayout;
+    console.log('[left layout] Off. Upgrades and Perks go back to pages the next time the game redraws them.');
+  };
+  console.log('[left layout] On: the sidebar is on the left and windows slide out from there. Turn it off with stopLeftLayout()');
+};
+
+// =====================================================================================================
+// Stacked names
+//
+// Every angler on the water has a name over their head, and with everyone fishing from the same spot
+// they all land on top of each other. This stacks the names that would overlap into a column instead,
+// the best on the gold leaderboard at the top and anyone not on it below, in name order. The game
+// still places each name over its angler; only the column is added, as a shift up (a transform), so
+// nothing the game draws changes.
+//  - the ranks come from the leaderboards the game itself shows (GET /api/leaderboard, read every
+//    minute); it never posts anything. Gold and ascensions each have a Twitch and an accounts board:
+//    both are merged into one ranking, sorted the way the game sorts them
+//  - right of a name, a badge for each ranking its player is in the top 5 of (gold, ascensions,
+//    Emberscales), with their place in it (Settings > Mods can change how far down the badges go, or
+//    turn them off). Each board sends its top 25, so a merged top 25 is complete
+//  - your own name joins the column when it overlaps, and gets its badges too
+// Stop it (and put the names back) with:  stopStackedNames(), or untick it in Settings > Mods
+// =====================================================================================================
+const stackedNames = async () => {
+  window.stopStackedNames?.();
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const [{ api }, { ICON_COLS, ICON_ROWS, ICON_INDEX }] = await Promise.all([mod('/src/api.js'), mod('/src/icon-index.js')]);
+
+  const REFRESH_MS = 60000;
+  const GAP = 1; // px between names in a column
+  const MEASURE_MS = 2000; // how often a name's size is measured again (the UI scale can change)
+  const BADGE = 18; // a badge's size (px)
+  const BADGE_GAP = 7; // room for the rank tag, which pokes out at a badge's bottom right
+  const BADGE_ROW = BADGE + 8; // a name with badges takes this much height in a column...
+  const BADGE_LIFT = 4; // ...and sits this far up in it, so the badges and their rank tags clear the rows around it
+  const BADGES_KEY = 'idle-angler-name-badges';
+  const readTop = () => {
+    try {
+      return Number(localStorage.getItem(BADGES_KEY) ?? 5);
+    } catch {
+      return 5;
+    }
+  };
+  let badgeTop = readTop(); // badges down to this rank; 0 = none
+  const hud = document.getElementById('scene-hud');
+  if (!hud) throw new Error('no #scene-hud: is the game running?');
+
+  // The boards with a badge, in the order they're drawn, and the icon each row gets. The icons are
+  // the Leaderboard window's own: gold's coin, Emberscales' scale, and for ascensions the draconic
+  // icon if the player has draconic ascensions (that board ranks by those first), the ✦ if not
+  // `order` sorts the merged boards as the game sorts each one: by gold, by draconic ascensions and
+  // then ascensions, by Emberscales
+  const BOARDS = [
+    { type: 'gold', boards: ['twitch', 'accounts'], label: 'Gold', icon: () => 'gold', order: (a, b) => b.score - a.score },
+    {
+      type: 'ascensions',
+      boards: ['twitch', 'accounts'],
+      label: 'Ascensions',
+      icon: (r) => (r.draconic > 0 ? 'draconic' : 'ascension'),
+      order: (a, b) => (b.draconic ?? 0) - (a.draconic ?? 0) || (b.ascensions ?? 0) - (a.ascensions ?? 0),
+    },
+    { type: 'emberscales', boards: [undefined], label: 'Emberscales', icon: () => 'ember', order: (a, b) => b.score - a.score },
+  ];
+  const sprite = (key) => {
+    const i = ICON_INDEX[key];
+    const el = document.createElement('i');
+    if (i !== undefined)
+      el.style.cssText = `background-image:url(/assets/icons/raven-16.png);background-size:${ICON_COLS * 16}px ${ICON_ROWS * 16}px;background-position:-${(i % ICON_COLS) * 16}px -${Math.floor(i / ICON_COLS) * 16}px`;
+    return el;
+  };
+  const iconEl = (kind) => {
+    if (kind === 'gold') return sprite('cur:gold');
+    if (kind === 'draconic') return sprite('ui:draconic');
+    const el = document.createElement('span');
+    if (kind === 'ember') el.className = 'ember-icon small'; // the game's own Emberscale
+    else {
+      el.className = 'sn-asc';
+      el.textContent = '✦';
+    }
+    return el;
+  };
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .sn-badges{position:absolute;left:0;top:0;display:flex;gap:${BADGE_GAP}px;pointer-events:none;white-space:nowrap}
+    .sn-badges[hidden]{display:none}
+    .sn-badge{position:relative;width:${BADGE}px;height:${BADGE}px;border-radius:50%;background:#14181c;
+      box-shadow:0 0 0 1px #5d6670,0 1px 2px rgba(0,0,0,.6);display:grid;place-items:center}
+    .sn-badge.r1{box-shadow:0 0 0 1px #f2c14e,0 0 5px rgba(242,193,78,.55)}
+    .sn-badge.r2{box-shadow:0 0 0 1px #c9d1d9,0 1px 2px rgba(0,0,0,.6)}
+    .sn-badge.r3{box-shadow:0 0 0 1px #c47a3a,0 1px 2px rgba(0,0,0,.6)}
+    .sn-badge i{width:16px;height:16px;image-rendering:pixelated;transform:scale(.82)}
+    .sn-badge .sn-asc{color:#c4b5fd;font:700 12px/1 system-ui,sans-serif}
+    .sn-badge b{position:absolute;right:-5px;bottom:-5px;min-width:10px;padding:0 2px;border-radius:5px;
+      background:#14181c;color:#f3f0e6;font:700 9px/11px system-ui,sans-serif;text-align:center;box-shadow:0 0 0 1px #5d6670}
+    .sn-badge.r1 b{color:#f2c14e;box-shadow:0 0 0 1px #f2c14e}
+  `;
+  document.head.append(style);
+
+  // Leaderboards: the column's order (name, lower case -> place in the merged gold boards) and the
+  // badges (name -> [{ board, rank, icon }], the place in each merged ranking; players who tie share one)
+  let order = new Map();
+  let ranked = new Map();
+  const nameKey = (r) => String(r?.name ?? '').toLowerCase();
+  const refresh = async () => {
+    const results = await Promise.all(
+      BOARDS.map(async (b) => {
+        const got = await Promise.allSettled(b.boards.map((board) => api.leaderboard(b.type, board)));
+        return got.flatMap((g) => (g.status === 'fulfilled' ? [...(g.value?.top ?? []), ...(g.value?.you ? [g.value.you] : [])] : []));
+      }),
+    );
+    if (results.every((rows) => !rows.length)) return; // keep the last ranks if every request failed
+    const best = new Map();
+    for (const r of results[0]) {
+      const key = nameKey(r);
+      if (key && !(best.get(key) >= r.score)) best.set(key, r.score);
+    }
+    if (best.size) order = new Map([...best].sort((a, b) => b[1] - a[1]).map(([key], i) => [key, i + 1]));
+    const next = new Map();
+    BOARDS.forEach((b, i) => {
+      const rows = new Map(); // one row a player (your own can come twice: in the top and as `you`)
+      for (const r of results[i]) {
+        const key = nameKey(r);
+        if (key && !rows.has(key)) rows.set(key, r);
+      }
+      const sorted = [...rows].sort((x, y) => b.order(x[1], y[1]));
+      sorted.forEach(([key, r], j) => {
+        const rank = j > 0 && !b.order(sorted[j - 1][1], r) ? next.get(sorted[j - 1][0]).find((x) => x.board === b).rank : j + 1;
+        const list = next.get(key) ?? [];
+        list.push({ board: b, rank, icon: b.icon(r) });
+        next.set(key, list);
+      });
+    });
+    for (const list of next.values()) list.sort((x, y) => BOARDS.indexOf(x.board) - BOARDS.indexOf(y.board));
+    ranked = next;
+  };
+  refresh().catch(() => {});
+  const timer = setInterval(() => refresh().catch(() => {}), REFRESH_MS);
+
+  const sizes = new WeakMap(); // name element -> { text, w, h, at }
+  const shifted = new Set(); // name elements we've moved
+  const badgeEls = new Map(); // name element -> its badge row
+  const size = (el, now) => {
+    let s = sizes.get(el);
+    if (!s || s.text !== el.textContent || now - s.at > MEASURE_MS) {
+      s = { text: el.textContent, w: el.offsetWidth, h: el.offsetHeight, at: now };
+      sizes.set(el, s);
+    }
+    return s;
+  };
+  const placeOf = (it) => order.get(it.text.toLowerCase()) ?? Infinity;
+  const byPlace = (a, b) => placeOf(a) - placeOf(b) || a.text.localeCompare(b.text);
+  const badgesOf = (text) => (badgeTop ? (ranked.get(text.toLowerCase()) ?? []).filter((x) => x.rank <= badgeTop) : []);
+  const setShift = (el, dy) => {
+    const t = dy ? `translate(-50%, calc(-100% - ${dy}px))` : '';
+    if (el.style.transform !== t) el.style.transform = t;
+    if (dy) shifted.add(el);
+    else shifted.delete(el);
+  };
+  // The badge row right of a name: rebuilt only when its badges change, moved every frame
+  const drawBadges = (it) => {
+    let row = badgeEls.get(it.el);
+    if (!it.badges.length) {
+      if (row) row.hidden = true;
+      return;
+    }
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'sn-badges';
+      hud.append(row);
+      badgeEls.set(it.el, row);
+    }
+    row.hidden = false;
+    const key = it.badges.map((x) => `${x.icon}${x.rank}`).join('|');
+    if (row.dataset.key !== key) {
+      row.dataset.key = key;
+      row.replaceChildren(
+        ...it.badges.map((x) => {
+          const b = document.createElement('span');
+          b.className = `sn-badge r${x.rank}`;
+          b.title = `#${x.rank} on the ${x.board.label} leaderboard`;
+          const n = document.createElement('b');
+          n.textContent = x.rank;
+          b.append(iconEl(x.icon), n);
+          return b;
+        }),
+      );
+    }
+    // Centred on the name, right of it
+    const t = `translate(${Math.round(it.x + it.w / 2 + 5)}px, ${Math.round(it.y - it.dy - it.nh / 2 - BADGE / 2)}px)`;
+    if (row.style.transform !== t) row.style.transform = t;
+  };
+  const dropBadges = (el) => {
+    badgeEls.get(el)?.remove();
+    badgeEls.delete(el);
+  };
+
+  // A column's box once stacked: rising from the lowest of its names, as wide as the names and badges
+  const stack = (group) => {
+    group.items.sort(byPlace);
+    const bottom = Math.max(...group.items.map((it) => it.y));
+    const n = group.items.length;
+    // Every name in a column gets the same slot (as tall as its tallest row, so badges fit), filled
+    // from the bottom up, with the name in the middle of it: the names are evenly spaced
+    const slot = Math.max(...group.items.map((it) => it.h));
+    // (A name on its own stays where the game put it; its slot is still counted round it, badges and all)
+    const lift = n > 1 ? 0 : group.items[0].lift;
+    group.items.forEach((it, i) => {
+      const slotBottom = bottom - (n - 1 - i) * (slot + GAP);
+      it.dy = n > 1 ? it.y - slotBottom + Math.round((slot - it.nh) / 2) : 0;
+    });
+    group.left = Math.min(...group.items.map((it) => it.x - it.w / 2));
+    group.right = Math.max(...group.items.map((it) => it.x + it.w / 2 + it.bw));
+    group.bottom = bottom + lift;
+    group.top = group.bottom - n * (slot + GAP) + GAP;
+  };
+  // Columns that overlap, or touch top to bottom (so a name next to a column joins its even spacing)
+  const overlap = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom + GAP && b.top < a.bottom + GAP;
+
+  let frame = 0;
+  const tick = () => {
+    frame = requestAnimationFrame(tick);
+    const now = performance.now();
+    const items = [];
+    for (const el of hud.querySelectorAll(':scope > .hud-name')) {
+      if (el.hidden) {
+        if (shifted.has(el)) setShift(el, 0);
+        continue;
+      }
+      const s = size(el, now);
+      if (!s.w) continue; // not shown (Settings can hide your own name)
+      const badges = badgesOf(s.text);
+      const bw = badges.length ? 5 + badges.length * (BADGE + BADGE_GAP) : 0;
+      const h = badges.length ? Math.max(s.h + 2 * BADGE_LIFT, BADGE_ROW) : s.h; // a row with badges needs room for them
+      const lift = badges.length ? Math.round((h - s.h) / 2) : 0;
+      items.push({ el, text: s.text, x: parseFloat(el.style.left) || 0, y: parseFloat(el.style.top) || 0, w: s.w, nh: s.h, h, lift, bw, badges, dy: 0 });
+    }
+    // Each name starts alone; columns that overlap merge and stack again, until none do
+    const groups = items.map((it) => ({ items: [it] }));
+    groups.forEach(stack);
+    for (let merged = true; merged; ) {
+      merged = false;
+      outer: for (let i = 0; i < groups.length; i++)
+        for (let j = i + 1; j < groups.length; j++)
+          if (overlap(groups[i], groups[j])) {
+            groups[i].items.push(...groups[j].items);
+            groups.splice(j, 1);
+            stack(groups[i]);
+            merged = true;
+            break outer;
+          }
+    }
+    const seen = new Set(items.map((it) => it.el));
+    for (const it of items) {
+      setShift(it.el, Math.round(it.dy));
+      drawBadges(it);
+    }
+    for (const el of [...shifted]) if (!seen.has(el)) setShift(el, 0);
+    for (const [el, row] of badgeEls) {
+      if (!el.isConnected) dropBadges(el);
+      else if (!seen.has(el)) row.hidden = true;
+    }
+  };
+  tick();
+
+  window.setStackedNamesBadges = (top) => (badgeTop = Number(top) || 0);
+  window.stopStackedNames = () => {
+    cancelAnimationFrame(frame);
+    clearInterval(timer);
+    for (const el of [...shifted]) setShift(el, 0);
+    for (const el of [...badgeEls.keys()]) dropBadges(el);
+    style.remove();
+    delete window.stopStackedNames;
+    delete window.setStackedNamesBadges;
+    console.log('[stacked names] Off: names sit over their anglers again.');
+  };
+  console.log('[stacked names] On: overlapping names stack by gold leaderboard rank, with rank badges. Turn it off with stopStackedNames()');
+};
+
+// =====================================================================================================
+// Company online
+//
+// In the Company window's "Top members", a green dot right of each member who's online now: the dot
+// next to the chat button's "N online", the same green, size and glow. Hover it for the water they're
+// fishing in. You always have one (you're playing).
+// Who's online comes from the game's own list of the players on the water with you (the server's
+// mates / mate / mateLeft messages; mates.js), which it keeps to draw their boats. Nothing more is asked
+// of the server. The game keeps that list to itself: each frame its scene asks it for the boats in your
+// water (Mates.inZone), so the first time it does, this keeps hold of the list.
+// The server sends every online member of your company, whatever water they're fishing in (and the other
+// players in your water, which this leaves out).
+// Stop it with:  stopCompanyOnline(), or untick it in Settings > Mods
+// =====================================================================================================
+const companyOnline = async () => {
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const S = await mod('/src/state.js');
+  const { Mates } = await mod('/src/mates.js');
+  const { ZONE_BY_ID } = await mod('/src/data.js');
+
+  window.stopCompanyOnline?.(); // replace one already running
+
+  // ---------- The game's list of who's on the water ----------
+  // Every method that reads or changes the list keeps hold of it (the scene calls inZone each frame) and,
+  // when it changed, has the dots redrawn.
+  let mates = null;
+  const proto = Mates.prototype;
+  const originals = {};
+  for (const name of ['inZone', 'update', 'replace', 'remove', 'clear']) {
+    const orig = proto[name];
+    if (typeof orig !== 'function') continue;
+    originals[name] = orig;
+    proto[name] = function (...args) {
+      if (mates !== this) {
+        mates = this;
+        later();
+      }
+      const out = orig.apply(this, args);
+      if (name !== 'inZone') later();
+      return out;
+    };
+  }
+
+  // Names are matched without regard to capitals (a Twitch display name and its login differ only in those)
+  const key = (name) => String(name ?? '').trim().toLowerCase();
+  // Who's online: name -> the water they're in, for the members of your company the list has
+  const online = () => {
+    const out = new Map();
+    for (const m of mates?.list?.values() ?? []) if (m.company !== false && m.name) out.set(key(m.name), m.zone);
+    return out;
+  };
+  // You, by every name the game shows for you, whichever the company list uses: your account's (top bar),
+  // your nickname (Character), and the one the company bounties mark as you
+  const firstText = (el) => (el?.firstChild?.nodeType === Node.TEXT_NODE ? el.firstChild.textContent : el?.textContent);
+  const myNames = () =>
+    new Set(
+      [
+        document.getElementById('nickname')?.textContent,
+        S.state.nickname,
+        document.querySelector('.doll-name')?.textContent,
+        ...[...document.querySelectorAll('.cb-top li.you')].map(firstText),
+      ]
+        .map(key)
+        .filter(Boolean),
+    );
+
+  // ---------- The dots ----------
+  const style = document.createElement('style');
+  style.id = 'company-online-style';
+  // The game's .online-dot (#4ade80, black edge), as the online count draws it: 8px, with its glow
+  style.textContent = `.co-online.online-dot{width:8px;height:8px;margin:0 0 0 7px;vertical-align:middle;box-shadow:0 0 6px rgba(74,222,128,.8)}`;
+  document.head.append(style);
+
+  const layer = document.getElementById('windows');
+  // The Company window's "Top members" table (ui.js renderCompany): rows of "#1 Name" and the score. The game
+  // folds the window's sections into fold-out boxes (foldSections: <details><summary>Top members</summary>
+  // <table>), so the table is the box's; as a plain <h3> heading, the one after it.
+  const memberRows = () => {
+    const out = [];
+    for (const h of layer?.querySelectorAll('summary, h3') ?? []) {
+      if (h.textContent.trim() !== 'Top members') continue;
+      const table = h.matches('summary') ? h.parentElement?.querySelector(':scope > table.kv') : h.nextElementSibling;
+      if (table?.matches('table.kv')) for (const td of table.querySelectorAll('tr > td:first-child')) out.push(td);
+    }
+    return out;
+  };
+  function draw() {
+    const on = online();
+    const me = myNames();
+    for (const td of memberRows()) {
+      const name = key(firstText(td).replace(/^\s*#\d+\s+/, ''));
+      const zone = me.has(name) ? S.state.zone : on.get(name);
+      const live = me.has(name) || on.has(name);
+      const dot = td.querySelector(':scope > .co-online');
+      const title = `Online now${ZONE_BY_ID[zone] ? `, fishing in the ${ZONE_BY_ID[zone].name}` : ''}${me.has(name) ? ' (you)' : ''}`;
+      if (!live) {
+        dot?.remove();
+        continue;
+      }
+      if (dot) {
+        if (dot.title !== title) dot.title = title;
+        continue;
+      }
+      const span = document.createElement('span');
+      span.className = 'online-dot co-online';
+      span.title = title;
+      td.append(span);
+    }
+  }
+  let frame = 0;
+  function later() {
+    if (!frame) frame = requestAnimationFrame(() => {
+      frame = 0;
+      draw();
+    });
+  }
+  const observer = new MutationObserver(later);
+  if (layer) observer.observe(layer, { childList: true, subtree: true });
+  later();
+
+  // For the console: companyOnline.check() says what it sees, when a dot is missing
+  window.companyOnline = {
+    get names() {
+      return [...online().keys()];
+    },
+    check: () => ({
+      foundTheList: Boolean(mates),
+      onTheWater: [...(mates?.list?.values() ?? [])].map((m) => `${m.name} (${m.zone}${m.company === false ? ', not your company' : ', your company'})`),
+      you: [...myNames()],
+      memberRows: memberRows().map((td) => firstText(td).trim()),
+    }),
+  };
+  window.stopCompanyOnline = () => {
+    for (const [name, orig] of Object.entries(originals)) proto[name] = orig;
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+    style.remove();
+    for (const dot of document.querySelectorAll('.co-online')) dot.remove();
+    delete window.companyOnline;
+    delete window.stopCompanyOnline;
+  };
+  console.log('[company online] On: a green dot by each company member online now (Company window). Turn it off with stopCompanyOnline()');
+};
+
+// =====================================================================================================
+// Smooth resizing
+//
+// While the game's picture changes size (the browser window dragged, a phone turned, the Quicklinks panel
+// sliding out), it flashes light blue. Why: the scene is drawn into a picture of the screen's size first
+// (postfx.js PostFx, for its light shafts and reflections), and the screen shows that picture. A new size
+// makes a new, empty one (PostFx.layout). Pixi then draws the screen at once, before the next frame has
+// drawn the scene into it (pixi.js ResizePlugin: renderer.resize, then render), so the screen shows only its
+// clear colour, the game's light blue (main.js: background 0x8fd3ff), until the next frame.
+// This draws the scene into the new picture as soon as it's made, with what the last frame drew it with
+// (the scene's lastPost), so the picture is never empty. Nothing else changes, and nothing goes to the server.
+// The same fix stands alone as idle-angler-smooth-resize.user.js; with both loaded, whichever starts last
+// replaces the other (they share stopSmoothResize), so it runs once.
+// Stop it with:  stopSmoothResize(), or untick it in Settings > Mods
+// =====================================================================================================
+const smoothResize = async () => {
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const { PostFx } = await mod('/src/postfx.js');
+
+  window.stopSmoothResize?.(); // replace one already running
+
+  const proto = PostFx.prototype;
+  const original = proto.layout;
+  let filled = 0;
+  proto.layout = function (L) {
+    const before = this.rt;
+    const out = original.call(this, L);
+    // A new picture (a new size): draw the scene into it now, as the next frame would
+    if (this.rt !== before && this.scene?.lastPost) {
+      this.render(this.scene.lastPost);
+      filled++;
+    }
+    return out;
+  };
+
+  window.smoothResize = { get filled() { return filled; } }; // for the console: pictures drawn at once
+  window.stopSmoothResize = () => {
+    if (proto.layout !== original) proto.layout = original;
+    delete window.smoothResize;
+    delete window.stopSmoothResize;
+  };
+  console.log('[smooth resize] On: no light-blue frames while the game resizes. Turn it off with stopSmoothResize()');
 };
 
 // =====================================================================================================
@@ -2629,9 +4045,11 @@ const MODS = [
   {
     id: 'incomePills',
     name: "Income pills and auto-click",
-    desc: "Gold, fish, chests and XP a second, measured each minute, and an Auto-click toggle (1-15 clicks a second) that starts on, at the top of Quicklinks (or in the top bar without it)",
+    desc: "Gold, fish, chests and XP a second, measured each minute, at the top of Quicklinks (or in the top bar without it). And an Auto-click toggle, here, that clicks the water 1-15 times a second (− / +); it starts on",
     start: incomePills,
     stop: 'stopGoldLogger',
+    // Live controls shown under the mod's row while it runs (an element the mod keeps up to date)
+    controls: () => window.incomeAutoClickControls?.(),
     // Shown under the mod's row; each is a localStorage key the mod reads as it starts
     options: [
       {
@@ -2646,7 +4064,7 @@ const MODS = [
   {
     id: 'buildSwitcher',
     name: "Build switcher",
-    desc: "A key left of the Angler button that puts on one of your saved gear sets; or press 1-5",
+    desc: "Press 1-5 to put on one of your saved gear sets (Quicklinks shows each one's key)",
     start: buildSwitcher,
     stop: 'stopBuildSwitcher',
   },
@@ -2658,11 +4076,85 @@ const MODS = [
     stop: 'stopWeatherForecast',
   },
   {
+    id: 'gearJudge',
+    name: "Gear judge",
+    desc: "The ▲ / ▼ on gear (Bags, the Market, Quicklinks) judged over a whole day of weather instead of this moment's: night-only and weather powers count for the time they work, by how much you click, without bonuses that are about to end. Or judge it for one time of day or weather, and for idle play or the Auto-clicker; or for opening chests (the money and treasure your chests pay with it on)",
+    start: gearJudge,
+    stop: 'stopGearJudge',
+    // The lists come from the game's world.js once the mod runs (these until then)
+    options: [
+      {
+        key: 'idle-angler-judge-time',
+        label: 'Time of day',
+        get values() {
+          return window.gearJudgeChoices?.time ?? [['any', 'Any time of day'], ['now', 'Time of day now']];
+        },
+        fallback: 'any',
+        apply: (value) => window.setGearJudge?.({ time: value }), // live, without a restart
+      },
+      {
+        key: 'idle-angler-judge-weather',
+        label: 'Weather',
+        get values() {
+          return window.gearJudgeChoices?.weather ?? [['any', 'Any weather'], ['now', 'Weather now']];
+        },
+        fallback: 'any',
+        apply: (value) => window.setGearJudge?.({ weather: value }),
+      },
+      {
+        key: 'idle-angler-judge-activity',
+        label: 'How you play',
+        get values() {
+          return window.gearJudgeChoices?.activity ?? [['now', 'As you click now'], ['idle', 'Idle'], ['auto', 'Auto-clicker']];
+        },
+        fallback: 'now',
+        apply: (value) => window.setGearJudge?.({ activity: value }),
+      },
+    ],
+  },
+  {
     id: 'summaryPanel',
     name: "Quicklinks",
-    desc: "A tab on the right edge that slides out your income a second, gear sets, bounties, ascending, the Foreman and its next upgrade, chests and the upgrades in your bag",
+    desc: "A sidebar on the right edge, with a Quicklinks button that slides out your income a minute, the gear you're wearing and your builds, bounties, ascending, the Foreman and its next upgrade, chests, the upgrades in your bag and the Market",
     start: summaryPanel,
     stop: 'stopSummaryPanel',
+  },
+  {
+    id: 'leftLayout',
+    name: "Left-hand layout",
+    desc: "The sidebar down the left edge, and windows that slide out from the left one at a time, moving the game over instead of covering it (the scene slides over whole, so your angler stays in view). Upgrades and Perks list every card instead of five a page",
+    start: leftLayout,
+    stop: 'stopLeftLayout',
+  },
+  {
+    id: 'stackedNames',
+    name: "Stacked names",
+    desc: "Names over the anglers on the water that would overlap stack in a column instead, the best on the gold leaderboard at the top. Right of a name, a badge for each leaderboard (gold, ascensions, Emberscales) its player is near the top of",
+    start: stackedNames,
+    stop: 'stopStackedNames',
+    options: [
+      {
+        key: 'idle-angler-name-badges',
+        label: 'Rank badges',
+        values: [['3', 'Top 3'], ['5', 'Top 5'], ['10', 'Top 10'], ['0', 'Off']],
+        fallback: '5',
+        apply: (value) => window.setStackedNamesBadges?.(Number(value)), // live, without a restart
+      },
+    ],
+  },
+  {
+    id: 'companyOnline',
+    name: "Company online",
+    desc: "A green dot by each member of your company who's online now, in the Company window's Top members (hover it for the water they're fishing in)",
+    start: companyOnline,
+    stop: 'stopCompanyOnline',
+  },
+  {
+    id: 'smoothResize',
+    name: "Smooth resizing",
+    desc: "No light-blue flashes while the game resizes: dragging the window, turning a phone, or Quicklinks sliding out",
+    start: smoothResize,
+    stop: 'stopSmoothResize',
   },
 ];
 const STORE_KEY = 'idle-angler-mods';
@@ -2730,6 +4222,7 @@ style.textContent = `
 .im-pane .im-state.off{opacity:.65}
 .im-pane .im-state.failed{color:#fca5a5}
 .im-pane .im-option{margin:-2px 0 8px 30px}
+.im-pane .im-controls{display:flex}
 `;
 document.head.append(style);
 
@@ -2758,7 +4251,7 @@ function paneHtml() {
     <label class="setting">
       <input type="checkbox" data-im="${m.id}" ${wanted(m) ? 'checked' : ''} ${starting.has(m.id) ? 'disabled' : ''}/>
       <span><b>${esc(m.name)}</b><span class="sub">${esc(m.desc)}</span><span class="im-state ${state[0]}">${esc(state[1])}</span></span>
-    </label>${(m.options ?? []).map((o) => optionHtml(m, o)).join('')}`;
+    </label>${m.controls && on ? `<div class="im-option im-controls" data-im-controls="${m.id}"></div>` : ''}${(m.options ?? []).map((o) => optionHtml(m, o)).join('')}`;
   };
   return `
     <h2>UI mods</h2>
@@ -2772,11 +4265,20 @@ function paneHtml() {
 
 const settingsWindow = () => layer.querySelector('section.window[data-win="settings"]');
 
+// A mod's live controls (its own element, with its own handlers) go into their spot under its row
+function mountControls(pane) {
+  for (const spot of pane.querySelectorAll('[data-im-controls]')) {
+    const el = MODS.find((m) => m.id === spot.dataset.imControls)?.controls?.();
+    if (el) spot.append(el);
+  }
+}
+
 function refreshPane() {
   const pane = settingsWindow()?.querySelector('.im-pane');
   if (!pane) return;
   const scroll = pane.parentElement.scrollTop;
   pane.innerHTML = paneHtml();
+  mountControls(pane);
   pane.parentElement.scrollTop = scroll;
 }
 
@@ -2799,6 +4301,7 @@ function decorate() {
     const pane = document.createElement('div');
     pane.className = 'im-pane';
     pane.innerHTML = paneHtml();
+    mountControls(pane);
     body.append(pane);
   }
   win.classList.toggle('im-showing', showing);
