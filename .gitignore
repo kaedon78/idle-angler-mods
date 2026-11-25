@@ -1,4 +1,8 @@
 # The test player is its own repo
 test-player/
-# Personal Claude Code permissions
-.claude/settings.local.json
+# Claude Code settings (machine paths, personal permissions)
+.claude/
+# Kept out of the repo: the alpha test reports, the handbook, the Undertow mini-game
+Idle Angler alpha*.md
+handbook/
+undertow/
