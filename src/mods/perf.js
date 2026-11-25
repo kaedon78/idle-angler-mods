@@ -1,17 +1,11 @@
 // ==UserScript==
 // @name         Idle Angler Performance
-// @namespace    http://tampermonkey.net/
-// @version      2026-11-19
+// @version      2026-11-25
 // @description  Lower CPU use for computers without graphics acceleration, keeping the look
-// @author       You
-// @match        https://idle-angler.onrender.com/
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
-// @grant        none
 // ==/UserScript==
 
 // Idle Angler — performance mod for slow computers (no GPU, or the GPU switched off in the browser).
-// It stands alone: it doesn't need the Idle Angler Mods script and doesn't change it. Load it with
-// Tampermonkey, or paste it into the DevTools console on https://idle-angler.onrender.com/ at any time.
+// Its script needs no other; with other Idle Angler mod scripts it shows in Settings > Mods with them.
 //
 // What it changes, each of which can be switched off on its own:
 //  - Frame cap. The game draws a new frame every time the screen refreshes (60 a second, 144 on a fast
@@ -40,7 +34,7 @@
 // Pasting it again replaces the one running. Stop it and put everything back with:
 //   stopIdleAnglerPerf()
 
-(async () => {
+const perf = async () => {
   window.stopIdleAnglerPerf?.();
 
   const KEY = 'idle-angler-perf';
@@ -258,4 +252,13 @@
     delete window.idleAnglerPerf;
     delete window.stopIdleAnglerPerf;
   };
-})();
+};
+
+idleAnglerMods.define({
+  id: 'perf',
+  order: 220,
+  name: 'Performance',
+  desc: 'Less CPU for computers without graphics acceleration: a frame cap (30 a second unless you pick another), lighter blurs, and a frames-a-second meter by the online count. Click the meter for its settings',
+  start: perf,
+  stop: 'stopIdleAnglerPerf',
+});

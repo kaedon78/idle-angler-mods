@@ -1,16 +1,12 @@
 // ==UserScript==
 // @name         Idle Angler Company Talk
-// @namespace    http://tampermonkey.net/
-// @version      2026-11-24
+// @version      2026-11-25
 // @description  Company Talk: speech bubbles and emotes over your company's anglers, carried by company chat
-// @author       You
-// @match        https://idle-angler.onrender.com/
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
-// @grant        none
 // ==/UserScript==
 
 // Idle Angler — Company Talk, a prototype of anglers talking to each other on the water, with no change
-// to the game's server. It stands alone (it doesn't need the Idle Angler Mods script).
+// to the game's server. Its script needs no other; with other Idle
+// Angler mod scripts it shows in Settings > Mods with them.
 //
 // The channel is the game's own company chat. Every company message (from anyone in your company, mod
 // or not) pops up as a speech bubble over that angler's head, if they're on the water in your zone (the
@@ -37,7 +33,7 @@
 // Pasting it again replaces the one running. Stop it with:
 //   stopCompanyTalk()
 
-(async () => {
+const companyTalk = async () => {
   window.stopCompanyTalk?.();
 
   // The emotes: the line that goes into chat, and the icon modded players see in the bubble
@@ -258,4 +254,13 @@
   };
 
   console.log(`[company talk] On${me.company ? ` for ${me.company.name}` : ' (not in a company: nothing to send or show)'}. Stop it with stopCompanyTalk()`);
-})();
+};
+
+idleAnglerMods.define({
+  id: 'companyTalk',
+  order: 210,
+  name: 'Company Talk',
+  desc: "Every company chat line pops up as a speech bubble over that angler on the water, and an emote bar above the chat button sends emotes as short chat lines (players without the mod read them as chat)",
+  start: companyTalk,
+  stop: 'stopCompanyTalk',
+});

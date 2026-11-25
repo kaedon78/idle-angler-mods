@@ -1,38 +1,561 @@
 // ==UserScript==
 // @name         Idle Angler Mods
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-19
-// @description  try to take over the world!
-// @author       You
+// @version      2026-11-25
+// @description  Idle Angler's UI mods in one script, each switched on or off in the game's Settings > Mods
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
 // @grant        none
 // ==/UserScript==
 
-// Idle Angler — UI mods, all in one script.
-// Paste into the DevTools console on https://idle-angler.onrender.com/ once you're signed in and the game
-// is running. It starts every mod you've left on, and adds a Mods tab to the game's Settings window
-// (Esc) where each one can be turned on or off. That takes effect at once and is remembered in this
-// browser for the next time the script runs. The mods:
-//  - Zone map strip: every place in the world under the top bar; click one to go there
-//  - Income pills and auto-click: measured gold, fish, chests and XP a minute; Auto-click 1-15/s (in Settings > Mods)
-//  - Build switcher: press 1-5 to put on a saved gear set
-//  - Weather forecast: click the time and weather in the top bar, or press W
-//  - Gear judge: ▲ / ▼ on gear judged over a whole day of weather (or the time and weather you pick)
-//  - Quicklinks: a sidebar on the right edge, its panel with what most needs you right now
-//  - Left-hand layout: the sidebar on the left, windows sliding out from there, no pages in Upgrades and Perks
-//  - Stacked names: names on the water that would overlap stack in a column, by gold leaderboard rank, with rank badges
-//  - Company online: a green dot by each company member online now, in the Company window
-//  - Smooth resizing: no light-blue frames while the game resizes (a window drag, a phone turned, Quicklinks)
-//  - Fog to the edge: in fog the haze covers the whole screen, not stopping a little behind your angler
-//  - Spots on time: a new fishing spot fades in when it appears, not seconds late on a device whose clock is behind
-// Pasting it again replaces the one running. Stop everything (and remove the Mods tab) with:
+// Built by build.mjs from src/: edit those files, not this one.
+//
+// Idle Angler — UI mods, all in one script. Each one also comes as a script of its own (scripts/), to load only
+// the ones you want; with this one too, a mod runs once. It adds a Mods tab to the game's Settings window (Esc),
+// where each mod is turned on or off; that takes effect at once and is remembered in this browser. The mods:
+//  - Zone Map: Every place in the world in a strip under the top bar: click one to go there
+//  - Income Pills: Measured gold, fish, chests and XP a minute
+//  - Auto-click: Clicks the water for you, 1-15 times a second
+//  - Build Switcher: Press 1-5 to put on a saved gear set
+//  - Weather Forecast: The weather hour by hour, day by day and by month: click the time and weather in the top bar, or press W
+//  - Gear Judge: ▲ / ▼ on gear judged over a whole day of weather, or the time and weather you pick
+//  - Quicklinks: A sidebar on the right edge, with a panel of what most needs you right now
+//  - Left-hand Layout: The sidebar on the left, windows sliding out from there, no pages in Upgrades and Perks
+//  - Stacked Names: Names on the water that would overlap stack in a column by gold leaderboard rank, with rank badges
+//  - Company Online: A green dot by each company member online now, in the Company window
+//  - Smooth Resizing: No light-blue flashes while the game resizes
+//  - Fog to the Edge: In fog the haze covers the whole screen
+//  - Spots on Time: A new fishing spot fades in when it appears, even on a device whose clock is behind
+// Load it with Tampermonkey, or paste it into the DevTools console on https://idle-angler.onrender.com/; it waits
+// for the game to be up. Pasting it again replaces the mods running. Stop everything (and remove the Mods tab) with:
 //   stopIdleAnglerMods()
-// Each mod below is the script it used to be, unchanged; the manager at the bottom runs them.
 
-(async () => {
-window.stopIdleAnglerMods?.(); // replace the mods already running
+(() => {
+// =====================================================================================================
+// The runtime: which mods run, and the Mods tab in the game's Settings window
+//
+// Every Idle Angler mod script carries this same runtime. The first script to run puts it on the page
+// (window.idleAnglerMods) and the others hand their mods to it, so whichever scripts you've installed,
+// one Mods tab lists them all, and each one can be turned on or off there. A script whose runtime is newer
+// (REV) takes over from an older one, keeping what's running.
+// The mods wait for the game to be up (signed in, its action bar filled in), then start one at a time in
+// their `order`, whatever order the scripts ran in: several of them move the game's layout, and each
+// measures it as it starts. A mod defined again (its script pasted again) replaces the one running.
+// Stop every mod (and remove the Mods tab) with:  stopIdleAnglerMods()
+// =====================================================================================================
+// The game draws a window's tabs and contents itself (ui.js renderWindow) and replaces them whenever
+// what it would draw changes, so the Mods tab can't be one of its tabs. Instead it's added to the
+// Settings window on screen, and added back each time the game redraws it. While it's showing, the
+// game's own contents are hidden, not removed: a click on one of the game's tabs brings them back.
+//
+// A mod is an object handed to idleAnglerMods.define():
+//   id       its key in the remembered choices (localStorage 'idle-angler-mods')
+//   order    where it starts among the others (the old one-script order: 10, 20, ...)
+//   name     its name in the Mods tab; desc: the line under it
+//   start    an async function that starts it; it defines window[stop] once it's running
+//   stop     the name of the window function that stops it (a mod is running while that exists)
+//   options  settings shown under its row, each a localStorage key the mod reads as it starts:
+//            { key, label, values: [[value, text], ...], fallback, apply? } a dropdown, or
+//            { key, label, toggle: true, fallback: 'on' | 'off', apply? } a checkbox ('on' / 'off').
+//            apply(value) takes a change live; without it the mod is restarted
+//   controls a function giving an element to show under its row while it runs (the mod keeps it up to date)
+const idleAnglerMods = (() => {
+  const REV = 1;
+  const older = window.idleAnglerMods;
+  if (older?.rev >= REV) return older;
+  const handed = older?.retire?.() ?? { mods: [], seen: new Set() }; // an older runtime's mods
 
+  const STORE_KEY = 'idle-angler-mods';
+  const loadChoices = () => {
+    try {
+      return JSON.parse(localStorage.getItem(STORE_KEY)) ?? {};
+    } catch {
+      return {};
+    }
+  };
+  const choices = loadChoices(); // mod id -> false once turned off (every mod is on until then)
+  const saveChoices = () => {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(choices));
+    } catch {
+      // storage blocked: the choice lasts until the page reloads
+    }
+  };
+  // Auto-click was part of the Income pills until 2026-11-25: turned off with them, it stays off
+  if (choices.incomePills === false && !('autoClick' in choices)) {
+    choices.autoClick = false;
+    saveChoices();
+  }
+
+  const mods = new Map(); // id -> mod
+  const inOrder = () => [...mods.values()].sort((a, b) => (a.order ?? 1000) - (b.order ?? 1000));
+  const wanted = (m) => choices[m.id] !== false;
+  const starting = new Set();
+  const failed = {}; // mod id -> why it didn't start
+  // A mod is running while its stop function exists (also true of one started or stopped from the console)
+  const running = (m) => typeof window[m.stop] === 'function';
+  let retired = false;
+
+  async function turnOn(m) {
+    if (starting.has(m.id) || retired || mods.get(m.id) !== m) return;
+    starting.add(m.id);
+    delete failed[m.id];
+    refreshPane();
+    try {
+      await m.start();
+      // A mod that can't find its part of the page warns in the console and returns without starting
+      if (!running(m)) failed[m.id] = "It couldn't find its part of the game page (the console says which).";
+    } catch (e) {
+      failed[m.id] = String(e?.message ?? e);
+      console.error(`[mods] ${m.name} failed to start`, e);
+    }
+    starting.delete(m.id);
+    refreshPane();
+  }
+
+  function turnOff(m) {
+    try {
+      window[m.stop]?.();
+    } catch (e) {
+      console.error(`[mods] ${m.name} failed to stop`, e);
+    }
+    delete failed[m.id];
+    refreshPane();
+  }
+
+  // Starting is one at a time: each start waits for the one before it
+  let chain = Promise.resolve();
+  const startInTurn = (m) => {
+    chain = chain.then(() => (wanted(m) && !running(m) ? turnOn(m) : null));
+    return chain;
+  };
+  // Mods defined since the last batch; started together, in their order, once the game is up
+  const pending = new Set();
+  const seen = new Set(handed.seen); // ids that have been through a batch (an older runtime's too)
+  let ready = false;
+  let batchQueued = false;
+  const batch = () => {
+    batchQueued = false;
+    if (!ready || retired) return;
+    const list = [...pending].sort((a, b) => (a.order ?? 1000) - (b.order ?? 1000));
+    pending.clear();
+    for (const m of list) {
+      seen.add(m.id);
+      if (mods.get(m.id) === m) startInTurn(m);
+    }
+    if (list.length) {
+      chain.then(() => {
+        if (retired) return;
+        const on = inOrder().filter(running).map((m) => m.name);
+        console.log(`[mods] On: ${on.join(', ') || 'none'}. Turn mods on or off in Settings > Mods; stop all with stopIdleAnglerMods()`);
+      });
+    }
+  };
+  const queue = (m) => {
+    pending.add(m);
+    if (!batchQueued) {
+      batchQueued = true;
+      setTimeout(batch, 0); // after the rest of this script (and any others running now) has defined its mods
+    }
+  };
+
+  function define(m) {
+    if (retired) return window.idleAnglerMods?.define(m); // (a newer runtime took over)
+    const before = mods.get(m.id);
+    if (before && running(before)) turnOff(before); // pasted again: the new copy replaces it
+    mods.set(m.id, m);
+    delete failed[m.id];
+    queue(m);
+    refreshPane();
+  }
+
+  // ---------- The Mods tab ----------
+  let layer = null; // the game's window layer (#windows), once the game is up
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  let showing = false; // the Mods tab is the one on screen
+
+  const style = document.createElement('style');
+  style.id = 'im-style';
+  style.textContent = `
+.window.im-showing > .win-body > :not(.win-tabs):not(.im-pane){display:none !important}
+.window:not(.im-showing) .im-pane{display:none}
+.im-pane .im-state{display:block;margin-top:2px;font-size:.85em}
+.im-pane .im-state.on{color:#86efac}
+.im-pane .im-state.off{opacity:.65}
+.im-pane .im-state.failed{color:#fca5a5}
+.im-pane .im-option{margin:-2px 0 8px 30px}
+.im-pane .im-option.setting{margin-top:-4px;margin-bottom:6px}
+.im-pane .im-controls{display:flex}
+`;
+
+  const optionValues = (o) => (o.toggle ? [['on', 'On'], ['off', 'Off']] : o.values);
+  const readOption = (o) => {
+    try {
+      const v = localStorage.getItem(o.key);
+      return optionValues(o).some(([value]) => value === v) ? v : o.fallback;
+    } catch {
+      return o.fallback;
+    }
+  };
+  // A mod's option: a dropdown in the game's own setting-select style, or a checkbox like the mods' own, outside
+  // the row's label so a click on it doesn't tick the mod's box
+  const optionHtml = (m, o) => {
+    const now = readOption(o);
+    if (o.toggle) {
+      return `
+    <label class="setting im-option"><input type="checkbox" data-im-opt="${m.id}" data-key="${o.key}" ${now === 'on' ? 'checked' : ''}/><span>${esc(o.label)}</span></label>`;
+    }
+    const opts = o.values.map(([value, text]) => `<option value="${value}" ${value === now ? 'selected' : ''}>${esc(text)}</option>`).join('');
+    return `
+    <label class="setting-select im-option">${esc(o.label)} <select data-im-opt="${m.id}" data-key="${o.key}">${opts}</select></label>`;
+  };
+
+  function paneHtml() {
+    const row = (m) => {
+      const on = running(m);
+      const state = starting.has(m.id) ? ['', 'Starting…'] : failed[m.id] ? ['failed', `Didn't start: ${failed[m.id]}`] : on ? ['on', 'On'] : ['off', 'Off'];
+      return `
+    <label class="setting">
+      <input type="checkbox" data-im="${m.id}" ${wanted(m) ? 'checked' : ''} ${starting.has(m.id) ? 'disabled' : ''}/>
+      <span><b>${esc(m.name)}</b><span class="sub">${esc(m.desc)}</span><span class="im-state ${state[0]}">${esc(state[1])}</span></span>
+    </label>${m.controls && on ? `<div class="im-option im-controls" data-im-controls="${m.id}"></div>` : ''}${(m.options ?? []).map((o) => optionHtml(m, o)).join('')}`;
+    };
+    return `
+    <h2>UI mods</h2>
+    <p class="muted small-text">These come from the Idle Angler mod scripts in this browser, not the game: ${mods.size === 1 ? 'one mod' : `${mods.size} mods`}. A change takes effect at once, and this browser remembers it the next time the scripts run.</p>
+    <div class="btn-row">
+      <button class="btn small" data-im-all="on">All on</button>
+      <button class="btn small" data-im-all="off">All off</button>
+    </div>
+    ${inOrder().map(row).join('')}`;
+  }
+
+  const settingsWindow = () => layer?.querySelector('section.window[data-win="settings"]');
+
+  // A mod's live controls (its own element, with its own handlers) go into their spot under its row
+  function mountControls(pane) {
+    for (const spot of pane.querySelectorAll('[data-im-controls]')) {
+      const el = mods.get(spot.dataset.imControls)?.controls?.();
+      if (el) spot.append(el);
+    }
+  }
+
+  function refreshPane() {
+    const pane = settingsWindow()?.querySelector('.im-pane');
+    if (!pane) return;
+    const scroll = pane.parentElement.scrollTop;
+    pane.innerHTML = paneHtml();
+    mountControls(pane);
+    pane.parentElement.scrollTop = scroll;
+  }
+
+  /** Put the Mods tab and its pane into the Settings window (again, after the game redraws it). */
+  function decorate() {
+    const win = settingsWindow();
+    const body = win?.querySelector('.win-body');
+    const tabs = body?.querySelector(':scope > .win-tabs');
+    if (!tabs) return;
+    let tab = tabs.querySelector('.im-tab');
+    if (!tab) {
+      tab = document.createElement('button');
+      tab.className = 'win-tab im-tab';
+      tab.type = 'button';
+      tab.textContent = 'Mods';
+      const credits = tabs.querySelector('[data-tab="credits"]');
+      tabs.insertBefore(tab, credits);
+    }
+    if (!body.querySelector(':scope > .im-pane')) {
+      const pane = document.createElement('div');
+      pane.className = 'im-pane';
+      pane.innerHTML = paneHtml();
+      mountControls(pane);
+      body.append(pane);
+    }
+    win.classList.toggle('im-showing', showing);
+    tab.classList.toggle('active', showing);
+    // The game's own active tab looks inactive while Mods shows (marked, so it can be given back)
+    for (const t of tabs.querySelectorAll('.win-tab:not(.im-tab)')) {
+      if (showing && t.classList.contains('active')) {
+        t.classList.remove('active');
+        t.dataset.imActive = '1';
+      } else if (!showing && t.dataset.imActive) {
+        t.classList.add('active');
+        delete t.dataset.imActive;
+      }
+    }
+  }
+
+  // The game adds the Settings window when it opens and rewrites its body when it redraws
+  let bodyObserver = null;
+  let watched = null;
+  function watch() {
+    const body = settingsWindow()?.querySelector('.win-body') ?? null;
+    if (body !== watched) {
+      bodyObserver?.disconnect();
+      watched = body;
+      if (!body) showing = false; // closed: it opens on the game's own tab next time
+      else {
+        bodyObserver = new MutationObserver(() => {
+          if (!body.querySelector(':scope > .im-pane') || !body.querySelector(':scope > .win-tabs .im-tab')) decorate();
+        });
+        bodyObserver.observe(body, { childList: true });
+      }
+    }
+    decorate();
+  }
+  const layerObserver = new MutationObserver(watch);
+
+  // Clicks: the Mods tab, the game's tabs (back to the game's contents), All on / All off
+  function onClick(e) {
+    const win = e.target.closest('section.window[data-win="settings"]');
+    if (!win) return;
+    const tab = e.target.closest('.win-tab');
+    if (tab?.classList.contains('im-tab')) {
+      showing = true;
+      decorate();
+      win.querySelector('.win-body').scrollTop = 0;
+      return;
+    }
+    if (tab && showing) {
+      showing = false;
+      decorate();
+      return;
+    }
+    const all = e.target.closest('[data-im-all]');
+    if (all) {
+      const on = all.dataset.imAll === 'on';
+      for (const m of inOrder()) {
+        choices[m.id] = on;
+        if (on && !running(m)) startInTurn(m);
+        else if (!on && running(m)) turnOff(m);
+      }
+      saveChoices();
+      refreshPane();
+    }
+  }
+
+  function onChange(e) {
+    const pick = e.target.closest('[data-im-opt]');
+    if (pick) {
+      pick.blur(); // the game doesn't redraw a window while one of its fields has focus
+      const value = pick.type === 'checkbox' ? (pick.checked ? 'on' : 'off') : pick.value;
+      try {
+        localStorage.setItem(pick.dataset.key, value);
+      } catch {
+        // storage blocked: the mod can't read it back, so it keeps its default
+      }
+      // The mod reads its options as it starts. A running one takes the change live if its option says how,
+      // and is restarted otherwise
+      const m = mods.get(pick.dataset.imOpt);
+      const o = m?.options?.find((x) => x.key === pick.dataset.key);
+      if (m && running(m)) {
+        if (o?.apply) o.apply(value);
+        else {
+          turnOff(m);
+          startInTurn(m);
+        }
+      }
+      return;
+    }
+    const box = e.target.closest('input[data-im]');
+    if (!box) return;
+    box.blur();
+    const m = mods.get(box.dataset.im);
+    if (!m) return;
+    choices[m.id] = box.checked;
+    saveChoices();
+    if (box.checked && !running(m)) startInTurn(m);
+    else if (!box.checked && running(m)) turnOff(m);
+    else refreshPane();
+  }
+
+  const addTab = () => {
+    layer = document.getElementById('windows');
+    if (!layer) return console.warn('[mods] The game page was not found (#windows): no Mods tab in Settings');
+    document.head.append(style);
+    layerObserver.observe(layer, { childList: true });
+    // Capture, so the game's tab is given back its active look before the game's own click handler runs
+    layer.addEventListener('click', onClick, true);
+    layer.addEventListener('change', onChange);
+    watch();
+  };
+  const removeTab = () => {
+    layerObserver.disconnect();
+    bodyObserver?.disconnect();
+    bodyObserver = watched = null;
+    layer?.removeEventListener('click', onClick, true);
+    layer?.removeEventListener('change', onChange);
+    const win = settingsWindow();
+    showing = false;
+    if (win) {
+      decorate();
+      win.classList.remove('im-showing');
+      win.querySelector('.im-tab')?.remove();
+      win.querySelector('.im-pane')?.remove();
+    }
+    style.remove();
+    layer = null;
+  };
+
+  // An older runtime's mods: the ones it had started stay as they are, the rest start with the next batch
+  for (const m of handed.mods) {
+    mods.set(m.id, m);
+    if (!seen.has(m.id)) queue(m);
+  }
+
+  // ---------- Waiting for the game ----------
+  // Up means signed in, with its action bar filled in (ui.js initUI). Started before that (straight after a
+  // reload), the mods found the game's page still half built: the build switcher's key went into the empty
+  // bar and was wiped when the game filled it in.
+  const gameUp = () => Boolean(document.querySelector('#actionbar [data-win="angler"]'));
+  let waiting = null;
+  const whenUp = () => {
+    ready = true;
+    addTab();
+    batch();
+  };
+  if (gameUp()) whenUp();
+  else {
+    console.log('[mods] Waiting for the game to finish loading…');
+    waiting = setInterval(() => {
+      if (!gameUp()) return;
+      clearInterval(waiting);
+      waiting = null;
+      whenUp();
+    }, 250);
+  }
+
+  // Hand over to a newer runtime: the Mods tab goes, the mods keep running
+  const retire = () => {
+    retired = true;
+    clearInterval(waiting);
+    removeTab();
+    return { mods: [...mods.values()], seen: new Set(seen) };
+  };
+
+  const api = {
+    rev: REV,
+    define,
+    retire,
+    get mods() { return inOrder().map((m) => ({ id: m.id, name: m.name, on: running(m), wanted: wanted(m), failed: failed[m.id] })); }, // for the console
+  };
+  window.idleAnglerMods = api;
+  window.stopIdleAnglerMods = () => {
+    for (const m of inOrder()) if (running(m)) turnOff(m);
+    retire();
+    if (window.idleAnglerMods === api) delete window.idleAnglerMods;
+    delete window.stopIdleAnglerMods;
+  };
+  return api;
+})();
+
+// =====================================================================================================
+// Shared by the Gear judge and Quicklinks: what a chest's value starts from
+//
+// A chest's coin and treasure start from your catch value, and the builds differ on how: the live game
+// (v1.7.0) starts from your fish value (stats.fishValue, or else the water's base value), the balance test
+// build (v1.7.1) multiplies the water's base value by it (loot.js rollChestContents). This reads which off
+// the game's own chest roll once, with your stats: the random spread of its coin (0.7-1.3) held at its
+// middle for that one call (Math.random put back after), in the water whose base value is highest, so the
+// two ways can't agree. Nothing is opened or sent.
+// =====================================================================================================
+function chestBaseRule({ rollChestContents, RARITIES, CHEST_GOLD, ZONES, stats }) {
+  const zone = ZONES.reduce((a, z) => (z.baseValue > a.baseValue ? z : a));
+  const tier = RARITIES.length - 1; // the biggest coin, so its rounding doesn't matter
+  const random = Math.random;
+  let gold;
+  Math.random = () => 0.5;
+  try {
+    gold = rollChestContents(zone, tier, stats).gold;
+  } finally {
+    Math.random = random;
+  }
+  const base = gold / (RARITIES[tier].valueMult * CHEST_GOLD * stats.valueMult * (stats.chestValueMult ?? 1));
+  const multiplies = Math.abs(base - (stats.fishValue ?? 1) * zone.baseValue) < Math.abs(base - (stats.fishValue ?? zone.baseValue));
+  return (s, z) => (multiplies ? (s.fishValue ?? 1) * z.baseValue : s.fishValue ?? z.baseValue);
+}
+
+// =====================================================================================================
+// Shared by Quicklinks and the Left-hand layout: the camera and the big announcements centre on the part of
+// the scene you can see
+//
+// Out on the water the game's camera keeps your angler in the middle of the scene (scene.js followBoat), and
+// the big announcement for a rare catch ("Legendary!", scene.js announce) shows there too. With a side panel
+// out, these two keep the scene at its full size (so the game never lays it out again), and part of it is
+// under the panel or past the edge of the screen: the middle of the scene isn't the middle of what you see,
+// and the bigger the screen, the further off it is. While either of them is on, both aim for the middle of
+// the part you see instead (the camera easing over as it always does). Where the game's camera doesn't
+// follow the boat (moored at the Pond's pier, the cabin framed) it stays put. It only moves what you see:
+// nothing goes to the server.
+// One for the page (kept on window), so two scripts that carry this don't wrap the game's methods twice.
+// =====================================================================================================
+const viewCentre = window.idleAnglerViewCentre ??= (() => {
+  const users = new Set();
+  const AIMED = ['followBoat', 'announce']; // the game's methods that aim for the middle of the screen
+  let proto = null, originals = null, probe = null, observer = null;
+  let share = 0.5; // where the middle of what you see is, as a share of the scene's width (the game's: half)
+  let stale = true;
+  const mark = () => { stale = true; };
+  // The part you see once the panels have finished sliding runs from the left panel's edge (--ll-push) to
+  // the right one's (--qs-push): the probe sits there, with no transition. The scene's left edge is always
+  // at the left end of it (the page moves over by as much), so the middle is half its width in
+  const measure = () => {
+    stale = false;
+    const seen = probe.getBoundingClientRect().width;
+    const whole = document.getElementById('game')?.clientWidth || innerWidth;
+    share = seen > 0 && whole > 0 ? Math.min(0.5, seen / 2 / whole) : 0.5;
+  };
+  // Each of these aims at the middle of the screen as L.SW / 2, and reads L.SW for nothing else: for the one
+  // call, the screen is made twice as wide as the middle of the part you see
+  const aimed = (original) => function (...args) {
+    if (stale) measure();
+    const L = this.L;
+    if (!L || share >= 0.5) return original.apply(this, args);
+    const sw = L.SW;
+    L.SW = sw * share * 2;
+    try { return original.apply(this, args); } finally { L.SW = sw; }
+  };
+  const install = async () => {
+    const { FishingScene } = await import(new URL('/src/scene.js', location.origin).href);
+    if (!users.size || proto) return; // turned off while the game's file loaded, or already on
+    proto = FishingScene.prototype;
+    originals = {};
+    for (const name of AIMED) {
+      originals[name] = proto[name];
+      proto[name] = aimed(originals[name]);
+    }
+    probe = document.createElement('div');
+    probe.id = 'ia-view-probe';
+    probe.style.cssText = 'position:fixed;top:0;height:0;left:var(--ll-push,0px);right:var(--qs-push,0px);visibility:hidden;pointer-events:none';
+    document.body.append(probe);
+    // The panels open and close with the page's classes (ll-open, qs-open), and the screen can change size
+    observer = new MutationObserver(mark);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    addEventListener('resize', mark);
+    stale = true;
+  };
+  return {
+    add(id) {
+      users.add(id);
+      stale = true;
+      if (!proto) install().catch((e) => console.warn('[view centre] The view stays as the game has it:', e));
+    },
+    remove(id) {
+      users.delete(id);
+      stale = true;
+      if (users.size || !proto) return;
+      for (const name of AIMED) proto[name] = originals[name];
+      observer.disconnect();
+      removeEventListener('resize', mark);
+      probe.remove();
+      proto = originals = probe = observer = null;
+      share = 0.5;
+    },
+    get share() { return share; }, // for the console: where the middle of what you see is (0.5 = the game's)
+  };
+})();
+
+{
 // =====================================================================================================
 // Zone map strip (was zone-map.js)
 //
@@ -623,17 +1146,27 @@ const zoneMap = async () => {
   };
 };
 
+idleAnglerMods.define({
+  id: 'zoneMap',
+  order: 10,
+  name: "Zone map strip",
+  desc: "A strip under the top bar with every place in the world: click one to go there. It shows your boat, your species mastery, ripe crops and missing fish that are biting now",
+  start: zoneMap,
+  stop: 'stopZoneMap',
+});
+}
+
+{
 // =====================================================================================================
-// Income pills and auto-click (was gold-income-logger.js)
+// Income pills (was gold-income-logger.js; its auto-clicker is the Auto-click mod now)
 //
 // Every minute (or every 5, 15 or 30 s: "Measure over" in Settings > Mods) it measures, over that time,
 // the gold you actually earned, the fish you caught, the chests you found and the XP you gained, each
 // per minute (as the game's own Gold / min at the top left, which is its estimate for idle fishing). They
 // show as pills at the top of the Quicklinks panel while it's on, or else in the top bar to the right of
 // your Emberscales (styled like the game's own +X/min pill). Hover a pill for details; the fish pill breaks the catch down by rarity. A shaded bar
-// in each pill shrinks as the time runs out, and changing your equipped gear starts it over. An "Auto-click" toggle in Settings > Mods (under
-// this mod) clicks the water for you, 1-15 times a second (− / +); it starts on. Stop it (and remove the pills) with:
-// stopGoldLogger()
+// in each pill shrinks as the time runs out, and changing your equipped gear starts it over.
+// Stop it (and remove the pills) with:  stopGoldLogger(), or untick it in Settings > Mods
 //
 // How it works: it samples counters the game only ever adds to:
 //  - state.lifetimeGold (bumped in earn()): spending, upgrades and ascending don't touch it, so
@@ -650,9 +1183,9 @@ const zoneMap = async () => {
 //    don't reset it.
 // =====================================================================================================
 const incomePills = async () => {
-  // How long each reading measures over: the "Measure over" choice in Settings > Mods (the manager's
-  // MODS options), kept in this browser. A change comes in through window.setGoldLoggerPeriod (below),
-  // which starts the measuring over without restarting the mod (that would turn auto-click back on).
+  // How long each reading measures over: the "Measure over" choice in Settings > Mods (this mod's option),
+  // kept in this browser. A change comes in through window.setGoldLoggerPeriod (below), which starts the
+  // measuring over without restarting the mod.
   let PERIOD_MS = (() => {
     try {
       const ms = Number(localStorage.getItem('idle-angler-income-period'));
@@ -733,11 +1266,9 @@ const incomePills = async () => {
     // In the Quicklinks panel: the top bar's .currency and .rate rules (ui.css scopes them to #topbar)
     '#qs-pills #measured-rate-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;' +
     'font:600 17px var(--num);font-variant-numeric:lining-nums tabular-nums;text-shadow:1px 1px 0 #000}' +
-    // ...and Auto-click, in Settings > Mods (the manager puts it under this mod's row)
-    ':is(#qs-pills,#measured-autoclick-wrap) .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
+    '#qs-pills .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
     'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
-    ':is(#qs-pills,#measured-autoclick-wrap) .rate .per{color:#8fbf6c}' +
-    '#measured-autoclick-wrap{font:600 17px var(--num);text-shadow:1px 1px 0 #000}';
+    '#qs-pills .rate .per{color:#8fbf6c}';
   document.head.append(style);
   // Each bar runs for the period in use when it's made (it can change: setGoldLoggerPeriod)
   const countdownBar = () => {
@@ -769,8 +1300,7 @@ const incomePills = async () => {
   wrap.append(...pills);
   // The pills: at the top of the Quicklinks panel while it's running (it sends idle-angler-quicklinks as it
   // starts and stops), else in the top bar right of the Emberscales. Moving a node restarts its CSS
-  // animation, so the countdown bars are set back to the time already measured. (The auto-click toggle,
-  // autoWrap below, lives in Settings > Mods.)
+  // animation, so the countdown bars are set back to the time already measured.
   const placePills = () => {
     const host = document.getElementById('qs-pills');
     if (host ? wrap.parentElement === host : !ember || (wrap.parentElement && wrap.previousElementSibling === ember)) return;
@@ -888,27 +1418,182 @@ const incomePills = async () => {
     hiddenDuringWindow = document.visibilityState === 'hidden';
   };
 
-  // ---------- Auto-clicker ----------
-  // The game allows auto-clicking: clicks over 15 a second simply don't count, on this side and on
-  // the server, and nobody is flagged (clicks.js; changelog "No more auto-clicker detection").
-  // A click is a pointerdown + pointerup sent straight to the game's canvas, which is where Pixi
-  // listens, so it takes the same path as your own clicks (Golden Fish check, the 15/s limiter,
-  // Frenzy). The events don't bubble, so the page's own menu and tooltip handlers never see them.
-  // Your own clicks share the same 15/s budget while it runs.
-  // The beat comes from a tiny Web Worker, because Chrome slows timers in background tabs to once a
-  // second (and later once a minute) but not a worker's messages, so it keeps clicking when the tab
-  // isn't in front. It starts on when you paste the script (click the pill to stop it); the − / +
-  // buttons set the rate, which this browser remembers.
+  placePills();
+  addEventListener('idle-angler-quicklinks', placePills);
+
+  // ---------- Restart the window when equipped gear changes ----------
+  // A reading that straddles a gear swap would mix two setups, so a swap starts a fresh window
+  // (and countdown). The fingerprint is what's worn in each slot plus those items' rolls, so
+  // reforging or upgrading a worn item counts too, while finding or selling other gear doesn't.
+  // Checked once a second. The pills keep the previous reading until the new one lands, so you
+  // can compare old gear against new; their tooltips say so.
+  const gearKey = () => {
+    const byUid = new Map((S.state.items ?? []).map((i) => [i.uid, i]));
+    return JSON.stringify(
+      Object.entries(S.state.equipped ?? {}).map(([slot, uid]) => {
+        const i = byUid.get(uid);
+        return [slot, uid, i && [i.tier, i.ilvl, i.ancient, i.power, i.set, i.stats, i.affixes]];
+      }),
+    );
+  };
+  const GEAR_MARK = '<!--gear-changed-->';
+  let lastGear = gearKey();
+  let id;
+  const restartWindow = (why = 'Gear changed') => {
+    clearInterval(id);
+    last = sample();
+    hiddenDuringWindow = document.visibilityState === 'hidden';
+    const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const notice =
+      `${GEAR_MARK}<div class="tip-sep"></div><div style="color:#fde68a">${why} at ${at}, so measuring restarted. ` +
+      `These numbers are from before the change until the new reading lands.</div>`;
+    for (const p of pills) {
+      p.querySelector('.measured-countdown')?.remove();
+      p.append(countdownBar());
+      setTip(p, (tips.get(p) ?? '').split(GEAR_MARK)[0] + notice); // replaces any earlier notice
+    }
+    id = setInterval(tick, PERIOD_MS);
+  };
+  const gearTimer = setInterval(() => {
+    const g = gearKey();
+    if (g !== lastGear) {
+      lastGear = g;
+      restartWindow();
+    }
+  }, 1000);
+
+  id = setInterval(tick, PERIOD_MS);
+  window.setGoldLoggerPeriod = (ms) => {
+    if (![5_000, 15_000, 30_000, 60_000].includes(ms) || ms === PERIOD_MS) return;
+    PERIOD_MS = ms;
+    restartWindow(`Measuring over ${ms < 60_000 ? `${ms / 1000} s` : '1 min'} from now`);
+  };
+  window.stopGoldLogger = () => {
+    delete window.setGoldLoggerPeriod;
+    clearInterval(id);
+    clearInterval(gearTimer);
+    document.removeEventListener('visibilitychange', onVis);
+    removeEventListener('idle-angler-quicklinks', placePills);
+    wrap.remove();
+    tip.remove();
+    style.remove();
+    delete window.stopGoldLogger;
+    // console.log('[gold/s] stopped');
+  };
+  // console.log(`[gold/s] started — first reading in ${PERIOD_MS / 1000}s (lifetime earned so far: ${money(last.copper)}, fish caught so far: ${last.fish}, chests found so far: ${last.chests}, total XP: ${fmtDec(last.xp)})`);
+};
+
+idleAnglerMods.define({
+  id: 'incomePills',
+  order: 20,
+  name: "Income pills",
+  desc: "Gold, fish, chests and XP a minute as you actually earn them, measured over the time below, at the top of Quicklinks (or in the top bar without it). Hover a pill for details",
+  start: incomePills,
+  stop: 'stopGoldLogger',
+  // Shown under the mod's row; each is a localStorage key the mod reads as it starts
+  options: [
+    {
+      key: 'idle-angler-income-period',
+      label: 'Measure over',
+      values: [['5000', '5 s'], ['15000', '15 s'], ['30000', '30 s'], ['60000', '1 min']],
+      fallback: '60000',
+      apply: (value) => window.setGoldLoggerPeriod?.(Number(value)), // live, without a restart
+    },
+  ],
+});
+}
+
+{
+// =====================================================================================================
+// Auto-click (was part of the Income pills)
+//
+// An "Auto-click" toggle in Settings > Mods (under this mod's row) clicks the water for you, 1-15 times a
+// second (− / +, remembered in this browser); it starts clicking as soon as the mod is on. Hover it for how
+// many clicks went out, how many the game counted, and how full the Frenzy bar stays.
+// The game allows auto-clicking: clicks over 15 a second simply don't count, on this side and on
+// the server, and nobody is flagged (clicks.js; changelog "No more auto-clicker detection").
+// A click is a pointerdown + pointerup sent straight to the game's canvas, which is where Pixi
+// listens, so it takes the same path as your own clicks (Golden Fish check, the 15/s limiter,
+// Frenzy). The events don't bubble, so the page's own menu and tooltip handlers never see them.
+// Your own clicks share the same 15/s budget while it runs.
+// The beat comes from a tiny Web Worker, because Chrome slows timers in background tabs to once a
+// second (and later once a minute) but not a worker's messages, so it keeps clicking when the tab
+// isn't in front.
+// The Gear judge reads the rate set here (localStorage 'measured-autoclick-cps') for "How you play: Auto-clicker".
+// Stop it with:  stopAutoClick(), or untick it in Settings > Mods
+// =====================================================================================================
+const autoClick = async () => {
+  const mod = (path) => import(new URL(path, location.origin).href);
+  const S = await mod('/src/state.js');
+  const { fmtDec } = await mod('/src/format.js');
+
+  window.stopAutoClick?.(); // replace one already running
+
+  // Rates are often well under 1/s, so keep two significant digits for small values.
+  const fmtRate = (n) => (n > 0 && n < 0.1 ? String(+n.toPrecision(2)) : fmtDec(n));
+  // "1h 23m" / "4m 05s" / "12s" / "0.4s".
+  const fmtDuration = (s) => {
+    if (!Number.isFinite(s)) return 'never at this rate';
+    if (s < 10) return `${+s.toFixed(1)}s`;
+    s = Math.round(s);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h ? `${h}h ${String(m).padStart(2, '0')}m` : m ? `${m}m ${String(sec).padStart(2, '0')}s` : `${sec}s`;
+  };
+
+  // ---------- Tooltip ----------
+  // The game's own #tooltip only renders its built-in data-tip keys (and hides itself over
+  // anything else), so this is a lookalike: the same frame and the game's tip classes, following
+  // the pointer the same way.
+  const tip = document.createElement('div');
+  tip.id = 'autoclick-tip';
+  tip.hidden = true;
+  tip.style.cssText =
+    'position:fixed;z-index:1000;max-width:min(500px,calc(100vw - 16px));padding:8px 12px;pointer-events:none;' +
+    'font-family:var(--font);font-size:14px;line-height:1.35;color:var(--text);border:9px solid;' +
+    'border-image:var(--fr-tip);box-shadow:0 6px 18px rgba(0,0,0,.6)';
+  document.body.append(tip);
+  const tips = new Map(); // button -> html
+  const placeTip = (e) => {
+    const pad = 14;
+    const { width, height } = tip.getBoundingClientRect();
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + width > innerWidth - 8) x = Math.max(8, e.clientX - width - pad);
+    if (y + height > innerHeight - 8) y = Math.max(8, e.clientY - height - pad);
+    tip.style.left = `${x}px`;
+    tip.style.top = `${y}px`;
+  };
+  const attachTip = (el) => {
+    el.addEventListener('pointerenter', (e) => { tip.innerHTML = tips.get(el) ?? ''; tip.hidden = false; placeTip(e); });
+    el.addEventListener('pointermove', placeTip);
+    el.addEventListener('pointerleave', () => { tip.hidden = true; });
+  };
+  const setTip = (el, html) => {
+    tips.set(el, html);
+    if (!tip.hidden && el.matches(':hover')) tip.innerHTML = html; // refresh if it's open
+  };
+
+  // ---------- The toggle and − / + ----------
+  // span.rate pills, as the game draws its +X/min in the top bar (ui.css scopes those rules to #topbar, so
+  // they're given here)
+  const style = document.createElement('style');
+  style.id = 'autoclick-style';
+  style.textContent =
+    '#measured-autoclick-wrap{font:600 17px var(--num);text-shadow:1px 1px 0 #000}' +
+    '#measured-autoclick-wrap .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
+    'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
+    '#measured-autoclick-wrap .rate .per{color:#8fbf6c}';
+  document.head.append(style);
+
   const AUTO_MIN = 1, AUTO_MAX = 15; // 15 is the game's cap: at it, timer jitter loses the odd click
   const AUTO_KEY = 'measured-autoclick-cps';
   let autoCps = 14;
   try { autoCps = Math.min(AUTO_MAX, Math.max(AUTO_MIN, Math.round(+localStorage.getItem(AUTO_KEY)) || 14)); } catch {}
-  // Its toggle and − / +: shown in Settings > Mods, under this mod's row (the manager asks for them
-  // through window.incomeAutoClickControls each time it draws the Mods tab)
+  // Shown in Settings > Mods, under this mod's row (the runtime asks for them through window.autoClickControls
+  // each time it draws the Mods tab)
   const autoWrap = document.createElement('div');
   autoWrap.id = 'measured-autoclick-wrap';
   autoWrap.style.cssText = 'display:flex;align-items:center;gap:3px';
-  window.incomeAutoClickControls = () => autoWrap;
+  window.autoClickControls = () => autoWrap;
   const autoBtn = document.createElement('span');
   autoBtn.className = 'rate';
   autoBtn.setAttribute('role', 'button');
@@ -926,13 +1611,11 @@ const incomePills = async () => {
   const minusBtn = stepBtn('−', -1);
   const plusBtn = stepBtn('+', 1);
   autoWrap.append(autoBtn, minusBtn, plusBtn);
-  placePills();
-  addEventListener('idle-angler-quicklinks', placePills);
   attachTip(autoBtn);
 
   // Where a click lands is where the game shows its "-0.25s": the middle of the part of the scene you see,
   // where the rare catch announcements show (with Quicklinks or the Left-hand layout panel out, part of
-  // the scene is under it: see viewCentre; its share is a half while neither is out)
+  // the scene is under it: see viewCentre; its share is a half while neither is out, or without them)
   const clickCanvas = () => {
     const c = document.querySelector('#game > canvas');
     const r = c?.getBoundingClientRect();
@@ -1041,75 +1724,33 @@ const incomePills = async () => {
     else renderAuto();
   };
   autoBtn.addEventListener('click', () => setAuto(!auto));
-  setAuto(true); // on from the start; click the pill to stop it
+  setAuto(true); // on from the start; click the toggle to stop it
   const autoTipTimer = setInterval(() => { if (auto) renderAuto(); }, 1000);
 
-  // ---------- Restart the window when equipped gear changes ----------
-  // A reading that straddles a gear swap would mix two setups, so a swap starts a fresh window
-  // (and countdown). The fingerprint is what's worn in each slot plus those items' rolls, so
-  // reforging or upgrading a worn item counts too, while finding or selling other gear doesn't.
-  // Checked once a second. The pills keep the previous reading until the new one lands, so you
-  // can compare old gear against new; their tooltips say so.
-  const gearKey = () => {
-    const byUid = new Map((S.state.items ?? []).map((i) => [i.uid, i]));
-    return JSON.stringify(
-      Object.entries(S.state.equipped ?? {}).map(([slot, uid]) => {
-        const i = byUid.get(uid);
-        return [slot, uid, i && [i.tier, i.ilvl, i.ancient, i.power, i.set, i.stats, i.affixes]];
-      }),
-    );
-  };
-  const GEAR_MARK = '<!--gear-changed-->';
-  let lastGear = gearKey();
-  let id;
-  const restartWindow = (why = 'Gear changed') => {
-    clearInterval(id);
-    last = sample();
-    hiddenDuringWindow = document.visibilityState === 'hidden';
-    const at = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const notice =
-      `${GEAR_MARK}<div class="tip-sep"></div><div style="color:#fde68a">${why} at ${at}, so measuring restarted. ` +
-      `These numbers are from before the change until the new reading lands.</div>`;
-    for (const p of pills) {
-      p.querySelector('.measured-countdown')?.remove();
-      p.append(countdownBar());
-      setTip(p, (tips.get(p) ?? '').split(GEAR_MARK)[0] + notice); // replaces any earlier notice
-    }
-    id = setInterval(tick, PERIOD_MS);
-  };
-  const gearTimer = setInterval(() => {
-    const g = gearKey();
-    if (g !== lastGear) {
-      lastGear = g;
-      restartWindow();
-    }
-  }, 1000);
-
-  id = setInterval(tick, PERIOD_MS);
-  window.setGoldLoggerPeriod = (ms) => {
-    if (![5_000, 15_000, 30_000, 60_000].includes(ms) || ms === PERIOD_MS) return;
-    PERIOD_MS = ms;
-    restartWindow(`Measuring over ${ms < 60_000 ? `${ms / 1000} s` : '1 min'} from now`);
-  };
-  window.stopGoldLogger = () => {
-    delete window.setGoldLoggerPeriod;
-    delete window.incomeAutoClickControls;
-    clearInterval(id);
-    clearInterval(gearTimer);
+  window.stopAutoClick = () => {
+    delete window.autoClickControls;
     clearInterval(autoTipTimer);
     beat?.stop();
     autoWrap.remove();
-    document.removeEventListener('visibilitychange', onVis);
-    removeEventListener('idle-angler-quicklinks', placePills);
-    wrap.remove();
     tip.remove();
     style.remove();
-    delete window.stopGoldLogger;
-    // console.log('[gold/s] stopped');
+    delete window.stopAutoClick;
   };
-  // console.log(`[gold/s] started — first reading in ${PERIOD_MS / 1000}s (lifetime earned so far: ${money(last.copper)}, fish caught so far: ${last.fish}, chests found so far: ${last.chests}, total XP: ${fmtDec(last.xp)})`);
 };
 
+idleAnglerMods.define({
+  id: 'autoClick',
+  order: 25,
+  name: "Auto-click",
+  desc: "Clicks the water for you, 1-15 times a second (− / +), from the toggle here. It starts clicking as soon as it's on, and keeps going in a background tab",
+  start: autoClick,
+  stop: 'stopAutoClick',
+  // Live controls shown under the mod's row while it runs (an element the mod keeps up to date)
+  controls: () => window.autoClickControls?.(),
+});
+}
+
+{
 // =====================================================================================================
 // Build switcher (was build-switcher.js)
 //
@@ -1168,6 +1809,17 @@ const buildSwitcher = async () => {
   };
 };
 
+idleAnglerMods.define({
+  id: 'buildSwitcher',
+  order: 30,
+  name: "Build switcher",
+  desc: "Press 1-5 to put on one of your saved gear sets (Quicklinks shows each one's key)",
+  start: buildSwitcher,
+  stop: 'stopBuildSwitcher',
+});
+}
+
+{
 // =====================================================================================================
 // Weather forecast (was weather-forecast.js)
 //
@@ -1794,32 +2446,17 @@ const weatherForecast = async () => {
   console.log(`[forecast] Ready: click the time and weather in the top bar, or press W.${exact ? '' : ' (using the game’s own weather lookup)'}`);
 };
 
-// =====================================================================================================
-// Shared by the Gear judge and Quicklinks: what a chest's value starts from
-//
-// A chest's coin and treasure start from your catch value, and the builds differ on how: the live game
-// (v1.7.0) starts from your fish value (stats.fishValue, or else the water's base value), the balance test
-// build (v1.7.1) multiplies the water's base value by it (loot.js rollChestContents). This reads which off
-// the game's own chest roll once, with your stats: the random spread of its coin (0.7-1.3) held at its
-// middle for that one call (Math.random put back after), in the water whose base value is highest, so the
-// two ways can't agree. Nothing is opened or sent.
-// =====================================================================================================
-function chestBaseRule({ rollChestContents, RARITIES, CHEST_GOLD, ZONES, stats }) {
-  const zone = ZONES.reduce((a, z) => (z.baseValue > a.baseValue ? z : a));
-  const tier = RARITIES.length - 1; // the biggest coin, so its rounding doesn't matter
-  const random = Math.random;
-  let gold;
-  Math.random = () => 0.5;
-  try {
-    gold = rollChestContents(zone, tier, stats).gold;
-  } finally {
-    Math.random = random;
-  }
-  const base = gold / (RARITIES[tier].valueMult * CHEST_GOLD * stats.valueMult * (stats.chestValueMult ?? 1));
-  const multiplies = Math.abs(base - (stats.fishValue ?? 1) * zone.baseValue) < Math.abs(base - (stats.fishValue ?? zone.baseValue));
-  return (s, z) => (multiplies ? (s.fishValue ?? 1) * z.baseValue : s.fishValue ?? z.baseValue);
+idleAnglerMods.define({
+  id: 'weatherForecast',
+  order: 40,
+  name: "Weather forecast",
+  desc: "Click the time and weather in the top bar, or press W, for the weather hour by hour, day by day and by month",
+  start: weatherForecast,
+  stop: 'stopWeatherForecast',
+});
 }
 
+{
 // =====================================================================================================
 // Gear judge
 //
@@ -1870,7 +2507,7 @@ const gearJudge = async () => {
   const TIME_KEY = 'idle-angler-judge-time';
   const WEATHER_KEY = 'idle-angler-judge-weather';
   const ACTIVITY_KEY = 'idle-angler-judge-activity';
-  const AUTO_KEY = 'measured-autoclick-cps'; // the Auto-click rate (Income pills mod), 14 until it's set
+  const AUTO_KEY = 'measured-autoclick-cps'; // the Auto-click mod's rate, 14 until it's set
   const IDLE_S = 3; // state.js IDLE_SPEED_MS: no click for this long and play counts as idle
   const STILL_SPEED = 1.5; // state.js: Still Waters (4 pieces) bites ×1.5 while idle
   const AHEAD_MS = 60 * 60_000; // judged an hour from now: bonuses that end before then are left out
@@ -2362,86 +2999,47 @@ const gearJudge = async () => {
   console.log('[gear judge] On: gear is judged over a whole day of weather (Settings > Mods). Turn it off with stopGearJudge()');
 };
 
-// =====================================================================================================
-// Shared by Quicklinks and the Left-hand layout: the camera and the big announcements centre on the part of
-// the scene you can see
-//
-// Out on the water the game's camera keeps your angler in the middle of the scene (scene.js followBoat), and
-// the big announcement for a rare catch ("Legendary!", scene.js announce) shows there too. With a side panel
-// out, these two keep the scene at its full size (so the game never lays it out again), and part of it is
-// under the panel or past the edge of the screen: the middle of the scene isn't the middle of what you see,
-// and the bigger the screen, the further off it is. While either of them is on, both aim for the middle of
-// the part you see instead (the camera easing over as it always does). Where the game's camera doesn't
-// follow the boat (moored at the Pond's pier, the cabin framed) it stays put. It only moves what you see:
-// nothing goes to the server.
-// One for the page (kept on window), so a second copy of this script doesn't wrap the game's methods twice.
-// =====================================================================================================
-const viewCentre = window.idleAnglerViewCentre ??= (() => {
-  const users = new Set();
-  const AIMED = ['followBoat', 'announce']; // the game's methods that aim for the middle of the screen
-  let proto = null, originals = null, probe = null, observer = null;
-  let share = 0.5; // where the middle of what you see is, as a share of the scene's width (the game's: half)
-  let stale = true;
-  const mark = () => { stale = true; };
-  // The part you see once the panels have finished sliding runs from the left panel's edge (--ll-push) to
-  // the right one's (--qs-push): the probe sits there, with no transition. The scene's left edge is always
-  // at the left end of it (the page moves over by as much), so the middle is half its width in
-  const measure = () => {
-    stale = false;
-    const seen = probe.getBoundingClientRect().width;
-    const whole = document.getElementById('game')?.clientWidth || innerWidth;
-    share = seen > 0 && whole > 0 ? Math.min(0.5, seen / 2 / whole) : 0.5;
-  };
-  // Each of these aims at the middle of the screen as L.SW / 2, and reads L.SW for nothing else: for the one
-  // call, the screen is made twice as wide as the middle of the part you see
-  const aimed = (original) => function (...args) {
-    if (stale) measure();
-    const L = this.L;
-    if (!L || share >= 0.5) return original.apply(this, args);
-    const sw = L.SW;
-    L.SW = sw * share * 2;
-    try { return original.apply(this, args); } finally { L.SW = sw; }
-  };
-  const install = async () => {
-    const { FishingScene } = await import(new URL('/src/scene.js', location.origin).href);
-    if (!users.size || proto) return; // turned off while the game's file loaded, or already on
-    proto = FishingScene.prototype;
-    originals = {};
-    for (const name of AIMED) {
-      originals[name] = proto[name];
-      proto[name] = aimed(originals[name]);
-    }
-    probe = document.createElement('div');
-    probe.id = 'ia-view-probe';
-    probe.style.cssText = 'position:fixed;top:0;height:0;left:var(--ll-push,0px);right:var(--qs-push,0px);visibility:hidden;pointer-events:none';
-    document.body.append(probe);
-    // The panels open and close with the page's classes (ll-open, qs-open), and the screen can change size
-    observer = new MutationObserver(mark);
-    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-    addEventListener('resize', mark);
-    stale = true;
-  };
-  return {
-    add(id) {
-      users.add(id);
-      stale = true;
-      if (!proto) install().catch((e) => console.warn('[view centre] The view stays as the game has it:', e));
+idleAnglerMods.define({
+  id: 'gearJudge',
+  order: 50,
+  name: "Gear judge",
+  desc: "The ▲ / ▼ on gear (Bags, the Market, Quicklinks) judged over a whole day of weather instead of this moment's: night-only and weather powers count for the time they work, by how much you click, without bonuses that are about to end. Or judge it for one time of day or weather, and for idle play or the Auto-clicker; or for opening chests (the money and treasure your chests pay with it on)",
+  start: gearJudge,
+  stop: 'stopGearJudge',
+  // The lists come from the game's world.js once the mod runs (these until then)
+  options: [
+    {
+      key: 'idle-angler-judge-time',
+      label: 'Time of day',
+      get values() {
+        return window.gearJudgeChoices?.time ?? [['any', 'Any time of day'], ['now', 'Time of day now']];
+      },
+      fallback: 'any',
+      apply: (value) => window.setGearJudge?.({ time: value }), // live, without a restart
     },
-    remove(id) {
-      users.delete(id);
-      stale = true;
-      if (users.size || !proto) return;
-      for (const name of AIMED) proto[name] = originals[name];
-      observer.disconnect();
-      removeEventListener('resize', mark);
-      probe.remove();
-      proto = originals = probe = observer = null;
-      share = 0.5;
+    {
+      key: 'idle-angler-judge-weather',
+      label: 'Weather',
+      get values() {
+        return window.gearJudgeChoices?.weather ?? [['any', 'Any weather'], ['now', 'Weather now']];
+      },
+      fallback: 'any',
+      apply: (value) => window.setGearJudge?.({ weather: value }),
     },
-    get share() { return share; }, // for the console: where the middle of what you see is (0.5 = the game's)
-  };
-})();
+    {
+      key: 'idle-angler-judge-activity',
+      label: 'How you play',
+      get values() {
+        return window.gearJudgeChoices?.activity ?? [['now', 'As you click now'], ['idle', 'Idle'], ['auto', 'Auto-clicker']];
+      },
+      fallback: 'now',
+      apply: (value) => window.setGearJudge?.({ activity: value }),
+    },
+  ],
+});
+}
 
+{
 // =====================================================================================================
 // Quicklinks (was summary-panel.js, the Summary panel)
 //
@@ -3122,7 +3720,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     <i class="win-corner tl"></i><i class="win-corner tr"></i><i class="win-corner bl"></i><i class="win-corner br"></i>`;
   const pillsHost = panel.querySelector('[data-qs="stats"] .qs-content');
   pillsHost.id = 'qs-pills';
-  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods to see them here.</p><div class="qs-gains"></div>';
+  pillsHost.innerHTML = '<p class="muted small-text qs-pills-off">Turn on Income pills in Settings &gt; Mods (or install its script) to see them here.</p><div class="qs-gains"></div>';
   panel.querySelector('[data-qs="stats"] .goto').title = 'Open the Min-maxer';
   host.append(panel);
   layer.append(host);
@@ -3378,6 +3976,17 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
   console.log('[quicklinks] On: its sidebar is on the right edge. Turn it off with stopSummaryPanel()');
 };
 
+idleAnglerMods.define({
+  id: 'summaryPanel',
+  order: 60,
+  name: "Quicklinks",
+  desc: "A sidebar on the right edge, with a Quicklinks button that slides out your income a minute, the gear you're wearing and your builds, bounties, ascending, the Foreman and its next upgrade, chests, the upgrades in your bag and the Market",
+  start: summaryPanel,
+  stop: 'stopSummaryPanel',
+});
+}
+
+{
 // =====================================================================================================
 // Left-hand layout
 //
@@ -3636,6 +4245,17 @@ const leftLayout = async () => {
   console.log('[left layout] On: the sidebar is on the left and windows slide out from there. Turn it off with stopLeftLayout()');
 };
 
+idleAnglerMods.define({
+  id: 'leftLayout',
+  order: 70,
+  name: "Left-hand layout",
+  desc: "The sidebar down the left edge, and windows that slide out from the left one at a time, moving the game over instead of covering it (the scene slides over whole, so your angler stays in view). Upgrades and Perks list every card instead of five a page",
+  start: leftLayout,
+  stop: 'stopLeftLayout',
+});
+}
+
+{
 // =====================================================================================================
 // Stacked names
 //
@@ -3909,6 +4529,26 @@ const stackedNames = async () => {
   console.log('[stacked names] On: overlapping names stack by gold leaderboard rank, with rank badges. Turn it off with stopStackedNames()');
 };
 
+idleAnglerMods.define({
+  id: 'stackedNames',
+  order: 80,
+  name: "Stacked names",
+  desc: "Names over the anglers on the water that would overlap stack in a column instead, the best on the gold leaderboard at the top. Right of a name, a badge for each leaderboard (gold, ascensions, Emberscales) its player is near the top of",
+  start: stackedNames,
+  stop: 'stopStackedNames',
+  options: [
+    {
+      key: 'idle-angler-name-badges',
+      label: 'Rank badges',
+      values: [['3', 'Top 3'], ['5', 'Top 5'], ['10', 'Top 10'], ['0', 'Off']],
+      fallback: '5',
+      apply: (value) => window.setStackedNamesBadges?.(Number(value)), // live, without a restart
+    },
+  ],
+});
+}
+
+{
 // =====================================================================================================
 // Company online
 //
@@ -4053,6 +4693,17 @@ const companyOnline = async () => {
   console.log('[company online] On: a green dot by each company member online now (Company window). Turn it off with stopCompanyOnline()');
 };
 
+idleAnglerMods.define({
+  id: 'companyOnline',
+  order: 90,
+  name: "Company online",
+  desc: "A green dot by each member of your company who's online now, in the Company window's Top members (hover it for the water they're fishing in)",
+  start: companyOnline,
+  stop: 'stopCompanyOnline',
+});
+}
+
+{
 // =====================================================================================================
 // Smooth resizing
 //
@@ -4064,8 +4715,6 @@ const companyOnline = async () => {
 // clear colour, the game's light blue (main.js: background 0x8fd3ff), until the next frame.
 // This draws the scene into the new picture as soon as it's made, with what the last frame drew it with
 // (the scene's lastPost), so the picture is never empty. Nothing else changes, and nothing goes to the server.
-// The same fix stands alone as idle-angler-smooth-resize.user.js; with both loaded, whichever starts last
-// replaces the other (they share stopSmoothResize), so it runs once.
 // Stop it with:  stopSmoothResize(), or untick it in Settings > Mods
 // =====================================================================================================
 const smoothResize = async () => {
@@ -4097,6 +4746,17 @@ const smoothResize = async () => {
   console.log('[smooth resize] On: no light-blue frames while the game resizes. Turn it off with stopSmoothResize()');
 };
 
+idleAnglerMods.define({
+  id: 'smoothResize',
+  order: 100,
+  name: "Smooth resizing",
+  desc: "No light-blue flashes while the game resizes: dragging the window, turning a phone, or Quicklinks sliding out",
+  start: smoothResize,
+  stop: 'stopSmoothResize',
+});
+}
+
+{
 // =====================================================================================================
 // Fog to the edge
 //
@@ -4135,6 +4795,17 @@ const fogToEdge = async () => {
   console.log('[fog to the edge] On: the haze covers the whole screen. Turn it off with stopFogToEdge()');
 };
 
+idleAnglerMods.define({
+  id: 'fogToEdge',
+  order: 110,
+  name: "Fog to the edge",
+  desc: "In fog the haze covers the whole screen, instead of stopping a little behind your angler out on the water",
+  start: fogToEdge,
+  stop: 'stopFogToEdge',
+});
+}
+
+{
 // =====================================================================================================
 // Spots on time
 //
@@ -4174,433 +4845,14 @@ const spotsOnTime = async () => {
   console.log('[spots on time] On: fishing spots fade in by the server’s clock. Turn it off with stopSpotsOnTime()');
 };
 
-// =====================================================================================================
-// The manager: which mods run, and the Mods tab in the Settings window
-// =====================================================================================================
-// The game draws a window's tabs and contents itself (ui.js renderWindow) and replaces them whenever
-// what it would draw changes, so the Mods tab can't be one of its tabs. Instead it's added to the
-// Settings window on screen, and added back each time the game redraws it. While it's showing, the
-// game's own contents are hidden, not removed: a click on one of the game's tabs brings them back.
-const MODS = [
-  {
-    id: 'zoneMap',
-    name: "Zone map strip",
-    desc: "A strip under the top bar with every place in the world: click one to go there. It shows your boat, your species mastery, ripe crops and missing fish that are biting now",
-    start: zoneMap,
-    stop: 'stopZoneMap',
-  },
-  {
-    id: 'incomePills',
-    name: "Income pills and auto-click",
-    desc: "Gold, fish, chests and XP a second, measured each minute, at the top of Quicklinks (or in the top bar without it). And an Auto-click toggle, here, that clicks the water 1-15 times a second (− / +); it starts on",
-    start: incomePills,
-    stop: 'stopGoldLogger',
-    // Live controls shown under the mod's row while it runs (an element the mod keeps up to date)
-    controls: () => window.incomeAutoClickControls?.(),
-    // Shown under the mod's row; each is a localStorage key the mod reads as it starts
-    options: [
-      {
-        key: 'idle-angler-income-period',
-        label: 'Measure over',
-        values: [['5000', '5 s'], ['15000', '15 s'], ['30000', '30 s'], ['60000', '1 min']],
-        fallback: '60000',
-        apply: (value) => window.setGoldLoggerPeriod?.(Number(value)), // live, without a restart
-      },
-    ],
-  },
-  {
-    id: 'buildSwitcher',
-    name: "Build switcher",
-    desc: "Press 1-5 to put on one of your saved gear sets (Quicklinks shows each one's key)",
-    start: buildSwitcher,
-    stop: 'stopBuildSwitcher',
-  },
-  {
-    id: 'weatherForecast',
-    name: "Weather forecast",
-    desc: "Click the time and weather in the top bar, or press W, for the weather hour by hour, day by day and by month",
-    start: weatherForecast,
-    stop: 'stopWeatherForecast',
-  },
-  {
-    id: 'gearJudge',
-    name: "Gear judge",
-    desc: "The ▲ / ▼ on gear (Bags, the Market, Quicklinks) judged over a whole day of weather instead of this moment's: night-only and weather powers count for the time they work, by how much you click, without bonuses that are about to end. Or judge it for one time of day or weather, and for idle play or the Auto-clicker; or for opening chests (the money and treasure your chests pay with it on)",
-    start: gearJudge,
-    stop: 'stopGearJudge',
-    // The lists come from the game's world.js once the mod runs (these until then)
-    options: [
-      {
-        key: 'idle-angler-judge-time',
-        label: 'Time of day',
-        get values() {
-          return window.gearJudgeChoices?.time ?? [['any', 'Any time of day'], ['now', 'Time of day now']];
-        },
-        fallback: 'any',
-        apply: (value) => window.setGearJudge?.({ time: value }), // live, without a restart
-      },
-      {
-        key: 'idle-angler-judge-weather',
-        label: 'Weather',
-        get values() {
-          return window.gearJudgeChoices?.weather ?? [['any', 'Any weather'], ['now', 'Weather now']];
-        },
-        fallback: 'any',
-        apply: (value) => window.setGearJudge?.({ weather: value }),
-      },
-      {
-        key: 'idle-angler-judge-activity',
-        label: 'How you play',
-        get values() {
-          return window.gearJudgeChoices?.activity ?? [['now', 'As you click now'], ['idle', 'Idle'], ['auto', 'Auto-clicker']];
-        },
-        fallback: 'now',
-        apply: (value) => window.setGearJudge?.({ activity: value }),
-      },
-    ],
-  },
-  {
-    id: 'summaryPanel',
-    name: "Quicklinks",
-    desc: "A sidebar on the right edge, with a Quicklinks button that slides out your income a minute, the gear you're wearing and your builds, bounties, ascending, the Foreman and its next upgrade, chests, the upgrades in your bag and the Market",
-    start: summaryPanel,
-    stop: 'stopSummaryPanel',
-  },
-  {
-    id: 'leftLayout',
-    name: "Left-hand layout",
-    desc: "The sidebar down the left edge, and windows that slide out from the left one at a time, moving the game over instead of covering it (the scene slides over whole, so your angler stays in view). Upgrades and Perks list every card instead of five a page",
-    start: leftLayout,
-    stop: 'stopLeftLayout',
-  },
-  {
-    id: 'stackedNames',
-    name: "Stacked names",
-    desc: "Names over the anglers on the water that would overlap stack in a column instead, the best on the gold leaderboard at the top. Right of a name, a badge for each leaderboard (gold, ascensions, Emberscales) its player is near the top of",
-    start: stackedNames,
-    stop: 'stopStackedNames',
-    options: [
-      {
-        key: 'idle-angler-name-badges',
-        label: 'Rank badges',
-        values: [['3', 'Top 3'], ['5', 'Top 5'], ['10', 'Top 10'], ['0', 'Off']],
-        fallback: '5',
-        apply: (value) => window.setStackedNamesBadges?.(Number(value)), // live, without a restart
-      },
-    ],
-  },
-  {
-    id: 'companyOnline',
-    name: "Company online",
-    desc: "A green dot by each member of your company who's online now, in the Company window's Top members (hover it for the water they're fishing in)",
-    start: companyOnline,
-    stop: 'stopCompanyOnline',
-  },
-  {
-    id: 'smoothResize',
-    name: "Smooth resizing",
-    desc: "No light-blue flashes while the game resizes: dragging the window, turning a phone, or Quicklinks sliding out",
-    start: smoothResize,
-    stop: 'stopSmoothResize',
-  },
-  {
-    id: 'fogToEdge',
-    name: "Fog to the edge",
-    desc: "In fog the haze covers the whole screen, instead of stopping a little behind your angler out on the water",
-    start: fogToEdge,
-    stop: 'stopFogToEdge',
-  },
-  {
-    id: 'spotsOnTime',
-    name: "Spots on time",
-    desc: "A new fishing spot fades in as soon as it appears, instead of seconds after the game already counts it when this device's clock is behind the server's",
-    start: spotsOnTime,
-    stop: 'stopSpotsOnTime',
-  },
-];
-const STORE_KEY = 'idle-angler-mods';
-const loadChoices = () => {
-  try {
-    return JSON.parse(localStorage.getItem(STORE_KEY)) ?? {};
-  } catch {
-    return {};
-  }
-};
-const choices = loadChoices(); // mod id -> false once turned off (every mod is on until then)
-const saveChoices = () => {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(choices));
-  } catch {
-    // storage blocked: the choice lasts until the page reloads
-  }
-};
-const wanted = (m) => m.always || choices[m.id] !== false;
-const starting = new Set();
-const failed = {}; // mod id -> why it didn't start
-// A mod is running while its stop function exists (also true of one stopped from the console)
-const running = (m) => typeof window[m.stop] === 'function';
-
-async function turnOn(m) {
-  if (starting.has(m.id)) return;
-  starting.add(m.id);
-  delete failed[m.id];
-  refreshPane();
-  try {
-    await m.start();
-    // A mod that can't find its part of the page warns in the console and returns without starting
-    if (!running(m)) failed[m.id] = "It couldn't find its part of the game page (the console says which).";
-  } catch (e) {
-    failed[m.id] = String(e?.message ?? e);
-    console.error(`[mods] ${m.name} failed to start`, e);
-  }
-  starting.delete(m.id);
-  refreshPane();
+idleAnglerMods.define({
+  id: 'spotsOnTime',
+  order: 120,
+  name: "Spots on time",
+  desc: "A new fishing spot fades in as soon as it appears, instead of seconds after the game already counts it when this device's clock is behind the server's",
+  start: spotsOnTime,
+  stop: 'stopSpotsOnTime',
+});
 }
 
-function turnOff(m) {
-  try {
-    window[m.stop]?.();
-  } catch (e) {
-    console.error(`[mods] ${m.name} failed to stop`, e);
-  }
-  delete failed[m.id];
-  refreshPane();
-}
-
-// ---------- The Mods tab ----------
-const layer = document.getElementById('windows');
-if (!layer) return console.warn('[mods] The game page was not found (#windows)');
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-let showing = false; // the Mods tab is the one on screen
-
-const style = document.createElement('style');
-style.id = 'im-style';
-style.textContent = `
-.window.im-showing > .win-body > :not(.win-tabs):not(.im-pane){display:none !important}
-.window:not(.im-showing) .im-pane{display:none}
-.im-pane .im-state{display:block;margin-top:2px;font-size:.85em}
-.im-pane .im-state.on{color:#86efac}
-.im-pane .im-state.off{opacity:.65}
-.im-pane .im-state.failed{color:#fca5a5}
-.im-pane .im-option{margin:-2px 0 8px 30px}
-.im-pane .im-controls{display:flex}
-`;
-document.head.append(style);
-
-const readOption = (o) => {
-  try {
-    const v = localStorage.getItem(o.key);
-    return o.values.some(([value]) => value === v) ? v : o.fallback;
-  } catch {
-    return o.fallback;
-  }
-};
-// A mod's option: a dropdown in the game's own setting-select style, outside the row's label so a click
-// on it doesn't tick the box
-const optionHtml = (m, o) => {
-  const now = readOption(o);
-  const opts = o.values.map(([value, text]) => `<option value="${value}" ${value === now ? 'selected' : ''}>${esc(text)}</option>`).join('');
-  return `
-    <label class="setting-select im-option">${esc(o.label)} <select data-im-opt="${m.id}" data-key="${o.key}">${opts}</select></label>`;
-};
-
-function paneHtml() {
-  const row = (m) => {
-    const on = running(m);
-    const state = starting.has(m.id) ? ['', 'Starting…'] : failed[m.id] ? ['failed', `Didn't start: ${failed[m.id]}`] : on ? ['on', 'On'] : ['off', 'Off'];
-    return `
-    <label class="setting">
-      <input type="checkbox" data-im="${m.id}" ${wanted(m) ? 'checked' : ''} ${starting.has(m.id) ? 'disabled' : ''}/>
-      <span><b>${esc(m.name)}</b><span class="sub">${esc(m.desc)}</span><span class="im-state ${state[0]}">${esc(state[1])}</span></span>
-    </label>${m.controls && on ? `<div class="im-option im-controls" data-im-controls="${m.id}"></div>` : ''}${(m.options ?? []).map((o) => optionHtml(m, o)).join('')}`;
-  };
-  return `
-    <h2>UI mods</h2>
-    <p class="muted small-text">These come from the idle-angler-mods.js script, not the game. A change takes effect at once, and this browser remembers it the next time the script runs.</p>
-    <div class="btn-row">
-      <button class="btn small" data-im-all="on">All on</button>
-      <button class="btn small" data-im-all="off">All off</button>
-    </div>
-    ${MODS.filter((m) => !m.always).map(row).join('')}`;
-}
-
-const settingsWindow = () => layer.querySelector('section.window[data-win="settings"]');
-
-// A mod's live controls (its own element, with its own handlers) go into their spot under its row
-function mountControls(pane) {
-  for (const spot of pane.querySelectorAll('[data-im-controls]')) {
-    const el = MODS.find((m) => m.id === spot.dataset.imControls)?.controls?.();
-    if (el) spot.append(el);
-  }
-}
-
-function refreshPane() {
-  const pane = settingsWindow()?.querySelector('.im-pane');
-  if (!pane) return;
-  const scroll = pane.parentElement.scrollTop;
-  pane.innerHTML = paneHtml();
-  mountControls(pane);
-  pane.parentElement.scrollTop = scroll;
-}
-
-/** Put the Mods tab and its pane into the Settings window (again, after the game redraws it). */
-function decorate() {
-  const win = settingsWindow();
-  const body = win?.querySelector('.win-body');
-  const tabs = body?.querySelector(':scope > .win-tabs');
-  if (!tabs) return;
-  let tab = tabs.querySelector('.im-tab');
-  if (!tab) {
-    tab = document.createElement('button');
-    tab.className = 'win-tab im-tab';
-    tab.type = 'button';
-    tab.textContent = 'Mods';
-    const credits = tabs.querySelector('[data-tab="credits"]');
-    tabs.insertBefore(tab, credits);
-  }
-  if (!body.querySelector(':scope > .im-pane')) {
-    const pane = document.createElement('div');
-    pane.className = 'im-pane';
-    pane.innerHTML = paneHtml();
-    mountControls(pane);
-    body.append(pane);
-  }
-  win.classList.toggle('im-showing', showing);
-  tab.classList.toggle('active', showing);
-  // The game's own active tab looks inactive while Mods shows (marked, so it can be given back)
-  for (const t of tabs.querySelectorAll('.win-tab:not(.im-tab)')) {
-    if (showing && t.classList.contains('active')) {
-      t.classList.remove('active');
-      t.dataset.imActive = '1';
-    } else if (!showing && t.dataset.imActive) {
-      t.classList.add('active');
-      delete t.dataset.imActive;
-    }
-  }
-}
-
-// The game adds the Settings window when it opens and rewrites its body when it redraws
-let bodyObserver = null;
-let watched = null;
-function watch() {
-  const body = settingsWindow()?.querySelector('.win-body') ?? null;
-  if (body !== watched) {
-    bodyObserver?.disconnect();
-    watched = body;
-    if (!body) showing = false; // closed: it opens on the game's own tab next time
-    else {
-      bodyObserver = new MutationObserver(() => {
-        if (!body.querySelector(':scope > .im-pane') || !body.querySelector(':scope > .win-tabs .im-tab')) decorate();
-      });
-      bodyObserver.observe(body, { childList: true });
-    }
-  }
-  decorate();
-}
-const layerObserver = new MutationObserver(watch);
-layerObserver.observe(layer, { childList: true });
-
-// Clicks: the Mods tab, the game's tabs (back to the game's contents), All on / All off
-function onClick(e) {
-  const win = e.target.closest('section.window[data-win="settings"]');
-  if (!win) return;
-  const tab = e.target.closest('.win-tab');
-  if (tab?.classList.contains('im-tab')) {
-    showing = true;
-    decorate();
-    win.querySelector('.win-body').scrollTop = 0;
-    return;
-  }
-  if (tab && showing) {
-    showing = false;
-    decorate();
-    return;
-  }
-  const all = e.target.closest('[data-im-all]');
-  if (all) {
-    const on = all.dataset.imAll === 'on';
-    for (const m of MODS.filter((x) => !x.always)) {
-      choices[m.id] = on;
-      if (on && !running(m)) turnOn(m);
-      else if (!on && running(m)) turnOff(m);
-    }
-    saveChoices();
-    refreshPane();
-  }
-}
-// Capture, so the game's tab is given back its active look before the game's own click handler runs
-layer.addEventListener('click', onClick, true);
-
-function onChange(e) {
-  const pick = e.target.closest('select[data-im-opt]');
-  if (pick) {
-    pick.blur();
-    try {
-      localStorage.setItem(pick.dataset.key, pick.value);
-    } catch {
-      // storage blocked: the mod can't read it back, so it keeps its default
-    }
-    // The mod reads its options as it starts. A running one takes the change live if its option says how,
-    // and is restarted otherwise
-    const m = MODS.find((x) => x.id === pick.dataset.imOpt);
-    const o = m?.options?.find((x) => x.key === pick.dataset.key);
-    if (m && running(m)) {
-      if (o?.apply) o.apply(pick.value);
-      else {
-        turnOff(m);
-        turnOn(m);
-      }
-    }
-    return;
-  }
-  const box = e.target.closest('input[data-im]');
-  if (!box) return;
-  box.blur(); // the game doesn't redraw a window while one of its boxes has focus
-  const m = MODS.find((x) => x.id === box.dataset.im);
-  if (!m) return;
-  choices[m.id] = box.checked;
-  saveChoices();
-  if (box.checked && !running(m)) turnOn(m);
-  else if (!box.checked && running(m)) turnOff(m);
-  else refreshPane();
-}
-layer.addEventListener('change', onChange);
-
-window.stopIdleAnglerMods = () => {
-  for (const m of MODS) if (running(m)) turnOff(m);
-  layerObserver.disconnect();
-  bodyObserver?.disconnect();
-  layer.removeEventListener('click', onClick, true);
-  layer.removeEventListener('change', onChange);
-  const win = settingsWindow();
-  showing = false;
-  if (win) {
-    decorate();
-    win.classList.remove('im-showing');
-    win.querySelector('.im-tab')?.remove();
-    win.querySelector('.im-pane')?.remove();
-  }
-  style.remove();
-  delete window.stopIdleAnglerMods;
-};
-
-watch();
-// Wait for the game to be up: signed in, with its action bar filled in (ui.js initUI). Pasted or loaded
-// before that (straight after a reload), the mods found the game's page still half built: the build
-// switcher's key went into the empty bar and was wiped when the game filled it in.
-const ready = () => Boolean(document.querySelector('#actionbar [data-win="angler"]'));
-if (!ready()) {
-  console.log('[mods] Waiting for the game to finish loading…');
-  await new Promise((done) => {
-    const check = setInterval(() => {
-      if (!ready() && window.stopIdleAnglerMods) return;
-      clearInterval(check);
-      done();
-    }, 250);
-  });
-  if (!window.stopIdleAnglerMods) return; // stopped (or replaced) while waiting
-}
-// One at a time, in the order above: several of them move the game's layout, and each measures it as it starts
-for (const m of MODS) if (wanted(m)) await turnOn(m);
-console.log(`[mods] On: ${MODS.filter(running).map((m) => m.name).join(', ') || 'none'}. Turn mods on or off in Settings > Mods; stop all with stopIdleAnglerMods()`);
 })();
