@@ -1795,6 +1795,32 @@ const weatherForecast = async () => {
 };
 
 // =====================================================================================================
+// Shared by the Gear judge and Quicklinks: what a chest's value starts from
+//
+// A chest's coin and treasure start from your catch value, and the builds differ on how: the live game
+// (v1.7.0) starts from your fish value (stats.fishValue, or else the water's base value), the balance test
+// build (v1.7.1) multiplies the water's base value by it (loot.js rollChestContents). This reads which off
+// the game's own chest roll once, with your stats: the random spread of its coin (0.7-1.3) held at its
+// middle for that one call (Math.random put back after), in the water whose base value is highest, so the
+// two ways can't agree. Nothing is opened or sent.
+// =====================================================================================================
+function chestBaseRule({ rollChestContents, RARITIES, CHEST_GOLD, ZONES, stats }) {
+  const zone = ZONES.reduce((a, z) => (z.baseValue > a.baseValue ? z : a));
+  const tier = RARITIES.length - 1; // the biggest coin, so its rounding doesn't matter
+  const random = Math.random;
+  let gold;
+  Math.random = () => 0.5;
+  try {
+    gold = rollChestContents(zone, tier, stats).gold;
+  } finally {
+    Math.random = random;
+  }
+  const base = gold / (RARITIES[tier].valueMult * CHEST_GOLD * stats.valueMult * (stats.chestValueMult ?? 1));
+  const multiplies = Math.abs(base - (stats.fishValue ?? 1) * zone.baseValue) < Math.abs(base - (stats.fishValue ?? zone.baseValue));
+  return (s, z) => (multiplies ? (s.fishValue ?? 1) * z.baseValue : s.fishValue ?? z.baseValue);
+}
+
+// =====================================================================================================
 // Gear judge
 //
 // The game marks gear ▲ (better for your build) or ▼ by comparing your stats with and without it under the
@@ -1834,7 +1860,8 @@ const gearJudge = async () => {
   const S = await mod('/src/state.js');
   const W = await mod('/src/world.js');
   const { BASE, OVERFLOW, SET_BY_ID, SET_COLOR, SLOTS, RARITIES, ZONES, ZONE_BY_ID, CHEST_GOLD, TREASURE_VALUE } = await mod('/src/data.js');
-  const { tierOdds, gearDropScale } = await mod('/src/loot.js');
+  const { tierOdds, gearDropScale, rollChestContents } = await mod('/src/loot.js');
+  const chestBase = chestBaseRule({ rollChestContents, RARITIES, CHEST_GOLD, ZONES, stats: S.getStats() }); // what a chest's value starts from, in this build
   const { hex } = await mod('/src/format.js');
   const { MAX_CPS } = await mod('/src/clicks.js');
 
@@ -2009,7 +2036,7 @@ const gearJudge = async () => {
     const chestValue = s.chestValueMult ?? 1; // Plunderer, Magpie, Fortune's Embrace
     let sum = 0;
     for (const { zone, tier, n } of kinds) {
-      const base = s.fishValue ?? zone.baseValue;
+      const base = chestBase(s, zone);
       const gold = base * RARITIES[tier].valueMult * CHEST_GOLD * s.valueMult * chestValue;
       // Each roll's treasure: a rarity from chest luck, no lower than 2 under the chest's (loot.js tierOddsFrom)
       const odds = tierOdds(s.chestLuckMult, Math.min(RARITIES.length - 1, zone.maxTier + 1));
