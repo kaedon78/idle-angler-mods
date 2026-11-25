@@ -2462,7 +2462,7 @@ const viewCentre = window.idleAnglerViewCentre ??= (() => {
 //    and the Oracle's "ascend for me" as buttons (Off, 1x-10x) beside the Ascend button
 //  - Foreman: the upgrade it buys next (as the Upgrades window draws it, with its buy button), and what
 //    it's buying (off, save up for the top of the list, or the next one you can afford)
-//  - Chests: how many you have, and Open all
+//  - Chests: how many you have, what opening them all now pays on average, and Open all
 //  - Bag: how full your bag is, then only the gear that's better for your build than what you're wearing
 //    (by the Gear judge while it runs, with its time of day, weather and way of playing to pick above the list)
 //  - Market: what's on sale now (as Market & Bounties > Market draws it; a click buys), when new stock
@@ -2477,9 +2477,11 @@ const viewCentre = window.idleAnglerViewCentre ??= (() => {
 const summaryPanel = async () => {
   const mod = (path) => import(new URL(path, location.origin).href);
   const S = await mod('/src/state.js');
-  const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS, UPGRADE_BY_ID, SLOT_BY_ID } = await mod('/src/data.js');
+  const { RARITIES, STATS, ZONES, ZONE_BY_ID, BOUNTIES, SET_COLOR, AUTO_ASCEND_AT, AUTOMATION_BY_ID, GEAR_SETS, UPGRADE_BY_ID, SLOT_BY_ID, CHEST_GOLD, TREASURE_VALUE } = await mod('/src/data.js');
   const { fmt, fmtHtml, fmtDecHtml, fmtOdds, money, moneyHtml, hex } = await mod('/src/format.js');
+  const { tierOdds, gearDropScale, rollChestContents } = await mod('/src/loot.js');
   const { GAIN_STATS, tenPercentPoints } = await mod('/src/minmax.js');
+  const chestBase = chestBaseRule({ rollChestContents, RARITIES, CHEST_GOLD, ZONES, stats: S.getStats() }); // what a chest's value starts from, in this build
   const { describeBounty, bountyProgress, rewardTier } = await mod('/src/bounties.js');
   const { ICON_COLS, ICON_ROWS, ICON_INDEX } = await mod('/src/icon-index.js');
 
@@ -2736,6 +2738,31 @@ const summaryPanel = async () => {
   }
 
   // ---------- Chests ----------
+  // What opening them all now pays on average. A chest's contents are rolled when it's opened, with your
+  // stats then (state.js rollChests, loot.js rollChestContents), so this is that roll's average with your
+  // stats now: its coin, and each roll's treasure (a rarity from chest luck, no lower than 2 under the
+  // chest's: loot.js tierOddsFrom) unless the roll is gear (CHEST_ITEM_CHANCE, not exported). Gear isn't
+  // priced: it's counted. A Golden Fish's Gold Rush counts for less when opening (state.js
+  // withGoldenForChests, not exported), so while one is on this reads high.
+  const CHEST_ITEM_CHANCE = 0.35;
+  function chestWorth(owned) {
+    const s = S.getStats();
+    const chestValue = s.chestValueMult ?? 1; // Plunderer, Magpie, Fortune's Embrace
+    let coin = 0, treasure = 0, gear = 0;
+    for (const { zone, tier, count } of owned) {
+      const base = chestBase(s, zone);
+      coin += count * base * RARITIES[tier].valueMult * CHEST_GOLD * s.valueMult * chestValue;
+      const odds = tierOdds(s.chestLuckMult, Math.min(RARITIES.length - 1, zone.maxTier + 1));
+      const floor = Math.max(0, tier - 2);
+      const perTreasure = base * odds.reduce((t, q, i) => t + (q || 0) * RARITIES[Math.max(i, floor)].valueMult, 0) * TREASURE_VALUE * s.treasureMult * chestValue;
+      const rolls = count * (1 + Math.floor(tier / 2));
+      const gearShare = CHEST_ITEM_CHANCE * gearDropScale(s, zone);
+      treasure += rolls * (1 - gearShare) * perTreasure;
+      gear += rolls * gearShare;
+    }
+    return { coin, treasure, gear };
+  }
+
   function chestsHtml() {
     const owned = Object.entries(S.state.chests ?? {})
       .map(([key, count]) => {
@@ -2751,9 +2778,19 @@ const summaryPanel = async () => {
       .map(([tier, n]) => `<span style="color:${tierColor(tier)}">${fmtHtml(n)} ${esc(tierName(tier))}</span>`)
       .join(' · ');
     const best = owned.length ? Math.max(...owned.map((c) => c.tier)) : 0;
+    let worth = '';
+    if (total) {
+      const { coin, treasure, gear } = chestWorth(owned);
+      const sold = S.state.settings?.autoSellTreasure && S.state.automations?.pawnbroker; // as applyChests sells it
+      const title = `Opening them all now pays about ${money(coin + treasure)} on average: ${money(coin)} in coin and ${money(treasure)} in treasure`
+        + (sold ? ', which the Pawnbroker sells at once.' : ', which goes to your bag to sell.')
+        + ` About ${fmt(Math.round(gear))} pieces of gear come out too (not counted).`
+        + ' Chests are priced when you open them, with your gear, weather and time of day then, so this moves with them.';
+      worth = `<div class="sub" title="${esc(title)}">Worth about <b>${moneyHtml(coin + treasure)}</b>${sold ? '' : ' with treasure sold'}</div>`;
+    }
     return `<div class="qs-chests">
         ${chestIcon(best)}
-        <div class="row-main"><div class="name">${total ? `${fmtHtml(total)} chest${total === 1 ? '' : 's'}` : 'No chests'}</div>${kinds ? `<div class="sub">${kinds}</div>` : ''}</div>
+        <div class="row-main"><div class="name">${total ? `${fmtHtml(total)} chest${total === 1 ? '' : 's'}` : 'No chests'}</div>${kinds ? `<div class="sub">${kinds}</div>` : ''}${worth}</div>
         <button class="btn primary" data-action="open-every-chest" ${disabled(!total)}>Open all</button>
       </div>`;
   }
