@@ -31,6 +31,7 @@ const MODS = [
   { file: 'smooth-resize', bundle: true },
   { file: 'fog-to-edge', bundle: true },
   { file: 'spots-on-time', bundle: true },
+  { file: 'chat-window', bundle: true },
   { file: 'waves', bundle: false },
   { file: 'company-talk', bundle: false },
   { file: 'perf', bundle: false },

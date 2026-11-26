@@ -13,7 +13,7 @@ The scripts are in [`scripts/`](scripts):
 
 | Script | What it does |
 | --- | --- |
-| [`idle-angler-mods.user.js`](scripts/idle-angler-mods.user.js) | **All the UI mods below in one script** (every one from Zone map to Spots on time) |
+| [`idle-angler-mods.user.js`](scripts/idle-angler-mods.user.js) | **All the UI mods below in one script** (every one from Zone map to Chat window) |
 | [`idle-angler-zone-map.user.js`](scripts/idle-angler-zone-map.user.js) | Zone map strip: every place in the world under the top bar; click one to go there |
 | [`idle-angler-income-pills.user.js`](scripts/idle-angler-income-pills.user.js) | Income pills: measured gold, fish, chests and XP a minute |
 | [`idle-angler-auto-click.user.js`](scripts/idle-angler-auto-click.user.js) | Auto-click: clicks the water for you, 1-15 times a second |
@@ -27,6 +27,7 @@ The scripts are in [`scripts/`](scripts):
 | [`idle-angler-smooth-resize.user.js`](scripts/idle-angler-smooth-resize.user.js) | Smooth resizing: no light-blue flashes while the game resizes |
 | [`idle-angler-fog-to-edge.user.js`](scripts/idle-angler-fog-to-edge.user.js) | Fog to the edge: in fog the haze covers the whole screen |
 | [`idle-angler-spots-on-time.user.js`](scripts/idle-angler-spots-on-time.user.js) | Spots on time: a new fishing spot fades in when it appears |
+| [`idle-angler-chat-window.user.js`](scripts/idle-angler-chat-window.user.js) | Chat window: drag its corner to resize it, a gear for the mod settings; message times and no company names if you like |
 | [`idle-angler-waves.user.js`](scripts/idle-angler-waves.user.js) | Waves: rolling waves, a far sea, boats in the water, hotspot buoys, lantern gauges, other players' lanterns |
 | [`idle-angler-company-talk.user.js`](scripts/idle-angler-company-talk.user.js) | Company Talk: speech bubbles and emotes over your company's anglers |
 | [`idle-angler-perf.user.js`](scripts/idle-angler-perf.user.js) | Performance: lower CPU use for computers without graphics acceleration |
@@ -93,6 +94,10 @@ tab until the page is reloaded.
 - **Smooth resizing:** no light-blue frames while the game resizes.
 - **Fog to the edge:** in fog the haze covers the whole screen.
 - **Spots on time:** a new fishing spot fades in when it appears, even on a device whose clock is behind.
+- **Chat window:** drag the chat window's top-right corner to make it wider or taller; double-click the corner
+  for its usual size. Under it in Settings > Mods, **Show each message's time** shows when each line was sent
+  (with the date for lines from before today), and **Hide company names in chat** leaves the `<Company>`
+  after each name out of both tabs. The gear by the chat's ✕ opens Settings > Mods there.
 
 ### Waves (`idle-angler-waves.user.js`)
 
