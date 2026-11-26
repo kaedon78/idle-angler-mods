@@ -3924,6 +3924,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
       // storage blocked: it's forgotten on reload
     }
     showFold(p);
+    if (p.id === 'bounties') fitDue = true;
     btn.blur();
     setTimeout(render, 0);
   };
@@ -3979,11 +3980,19 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     const px = `${Math.round(top)}px`;
     if (bar.style.top !== px) bar.style.top = px;
   }
+  // Watched for its pinned class and its size (not everything inside it: its level and XP text change all
+  // the time, and each placeBar measures the page). A move nothing here sees is caught by the next render
   const barObserver = new MutationObserver(syncBar);
+  const barSizes = new ResizeObserver(syncBar);
   const watchBars = () => {
     barObserver.disconnect();
+    barSizes.disconnect();
     const main = document.getElementById('hotbar');
-    if (main) barObserver.observe(main, { attributes: true, attributeFilter: ['class', 'style'], subtree: true, childList: true, characterData: true });
+    if (!main) return;
+    barObserver.observe(main, { attributes: true, attributeFilter: ['class', 'style'] });
+    barSizes.observe(main);
+    const nav = main.querySelector('#actionbar');
+    if (nav) barSizes.observe(nav);
   };
   watchBars();
   syncBar();
@@ -3996,6 +4005,14 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
   let isOpen = false;
   let pressing = false;
   let pending = 0;
+  // fitWidth measures the bounty names, which makes the browser lay out the page first (and the Market's
+  // countdown has just changed it), so it runs only when they may have changed: new bounty rows, the
+  // section unfolded, the panel opened or the window resized
+  let fitDue = true;
+  const onResizeFit = () => {
+    fitDue = true;
+  };
+  addEventListener('resize', onResizeFit);
   function render() {
     pending = 0;
     if (window.summaryPanelRun !== run) return stop(); // a newer copy runs now
@@ -4028,9 +4045,13 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
       if (html !== p.last) {
         p.content.innerHTML = html;
         p.last = html;
+        if (p.id === 'bounties') fitDue = true;
       }
     }
-    fitWidth();
+    if (fitDue) {
+      fitDue = false;
+      fitWidth();
+    }
   }
 
   // Widen (or narrow) the panel by what the longest bounty name lacks (or has to spare). Each name's text
@@ -4108,7 +4129,10 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
         // storage blocked: the panel just starts closed next time
       }
     }
-    if (open) render();
+    if (open) {
+      fitDue = true;
+      render();
+    }
     relayout();
   }
 
@@ -4132,8 +4156,10 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     removeEventListener('pointerup', onRelease);
     removeEventListener('pointercancel', onRelease);
     removeEventListener('resize', placeBar);
+    removeEventListener('resize', onResizeFit);
     removeEventListener('idle-angler-gear-judge', onJudge);
     barObserver.disconnect();
+    barSizes.disconnect();
     grip.remove();
     host.remove();
     bar.remove();
