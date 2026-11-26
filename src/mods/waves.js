@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Idle Angler Waves
-// @version      2026-11-26.1
+// @version      2026-11-26.2
 // @description  Rolling waves on the water: none inland, building from the Coast to the Open Ocean, calming to still water in the Cosmic Void; boats sit in the water
 // ==/UserScript==
 
@@ -58,12 +58,13 @@
 //                  waves.force = 0.8    try a size anywhere, even in the Pond, up to 1.35 (the Open Ocean in a
 //                                       storm); waves.force = null: back to normal
 //                  waves.surface        the surface on screen now, column by column (art px)
-//                  waves.panel = false  hide the test panel (true: show it again)
+//                  waves.panel = false  hide the test panel on a local test server (true: show it again)
 // Stop it with:    stopWaves(), or untick it in Settings > Mods
 //
-// The test panel (the "Waves" tab on the left; click it to open) sets the time of day, the weather and the size of
-// the sea, to try the waves in any conditions. Time and weather there change only how the scene is drawn (sky,
-// light, clouds, rain, the sea), not the game's own conditions: the HUD, bite times and luck stay as they are.
+// On a local test server (localhost), a test panel (the "Waves" tab on the left; click it to open) sets the time
+// of day, the weather and the size of the sea, to try the waves in any conditions. Time and weather there change
+// only how the scene is drawn (sky, light, clouds, rain, the sea), not the game's own conditions: the HUD, bite times
+// and luck stay as they are. It isn't shown on the live game.
 
 const waves = async () => {
   const mod = (path) => import(new URL(path, location.origin).href);
@@ -2131,6 +2132,9 @@ void main(void) {
   const PANEL_ID = 'waves-test-panel';
   document.getElementById(PANEL_ID)?.remove();
   document.getElementById(`${PANEL_ID}-style`)?.remove();
+  // The panel only on a local test server, not on the live game (there, waves.force in the console tries a sea)
+  const host = location.hostname;
+  const LOCAL = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(host) || host.endsWith('.localhost');
   const store = {
     get(k) { try { return localStorage.getItem(`waves.${k}`); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(`waves.${k}`, v); } catch {} },
@@ -2149,7 +2153,7 @@ void main(void) {
 #${PANEL_ID} button.on { background: #2f6fcf; border-color: #79a8f2; }
 #${PANEL_ID} .wv-note { font-size: 10px; opacity: 0.55; margin: -2px 0 8px; }
 `;
-  document.head.appendChild(style);
+  if (LOCAL) document.head.appendChild(style);
   const panel = document.createElement('div');
   panel.id = PANEL_ID;
   for (const type of ['pointerdown', 'mousedown', 'click', 'wheel', 'keydown']) panel.addEventListener(type, (e) => e.stopPropagation());
@@ -2183,13 +2187,8 @@ void main(void) {
     }
   };
   const refresh = () => rows.forEach((fn) => fn());
-  // The time of day and weather (how they look) only on a local test server, not on the live game
-  const host = location.hostname;
-  const LOCAL = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(host) || host.endsWith('.localhost');
-  if (LOCAL) {
-    group('Time of day', TIMES, () => look.time, (v) => (look.time = v));
-    group('Weather', [['Real', null], ...WEATHERS.map((w) => [w.name, w.id])], () => look.weather, (v) => (look.weather = v), 'Only how it looks: the game’s own time and weather (bites, luck) stay as they are');
-  }
+  group('Time of day', TIMES, () => look.time, (v) => (look.time = v));
+  group('Weather', [['Real', null], ...WEATHERS.map((w) => [w.name, w.id])], () => look.weather, (v) => (look.weather = v), 'Only how it looks: the game’s own time and weather (bites, luck) stay as they are');
   group('Sea', SEAS, () => force, (v) => (window.waves.force = v));
   const open = (on) => {
     body.style.display = on ? '' : 'none';
@@ -2199,7 +2198,7 @@ void main(void) {
   tab.addEventListener('click', () => open(body.style.display === 'none'));
   open(store.get('panelOpen') === '1');
   panel.style.display = store.get('panelHidden') === '1' ? 'none' : '';
-  document.body.appendChild(panel);
+  if (LOCAL) document.body.appendChild(panel);
   refresh();
 
   proto.render = render;
@@ -2210,7 +2209,7 @@ void main(void) {
     get frames() { return frames; }, // frames drawn with waves (for checking it runs)
     get boat() { return myBoat.shown ?? 0; }, // your boat's height on the water now (art px, up positive)
     get surface() { return { col0: surf.col0, heights: Array.from(surf.col.subarray(0, surf.n)) }; }, // the drawn surface, column by column
-    get panel() { return panel.style.display !== 'none'; },
+    get panel() { return LOCAL && panel.style.display !== 'none'; }, // (local test servers only)
     set panel(v) {
       panel.style.display = v ? '' : 'none';
       store.set('panelHidden', v ? '0' : '1');
@@ -2249,7 +2248,7 @@ idleAnglerMods.define({
   id: 'waves',
   order: 200,
   name: 'Waves',
-  desc: "Rolling waves that build from the Coast to the Open Ocean and calm to still water in the Cosmic Void, bigger in storms, with a far sea out to the horizon. It needs the game's shaders on (Settings). A Waves tab on the left tries other sea sizes",
+  desc: "Rolling waves that build from the Coast to the Open Ocean and calm to still water in the Cosmic Void, bigger in storms, with a far sea out to the horizon. It needs the game's shaders on (Settings)",
   start: waves,
   stop: 'stopWaves',
   // Each part on its own (the waves are what they ride on); a change restarts the waves
