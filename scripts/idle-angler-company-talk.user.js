@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Company Talk
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25
+// @version      2026-11-26
 // @description  Company Talk: speech bubbles and emotes over your company's anglers, carried by company chat
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -26,8 +26,8 @@
 //  - sending: POST /api/chat { channel: 'company', text }, what the chat window's Send does. Nothing is
 //    sent unless you press an emote (or type in the chat yourself); there's a 4 s cooldown between emotes
 //  - placing: the game puts each name over its angler as an HTML element (.hud-name, and .mate-name for
-//    company members); a bubble follows that element every frame, so it rides along when the boat
-//    sails, and with the Stacked names mod too
+//    company members); a bubble follows that element every frame while it shows, so it rides along when
+//    the boat sails, and with the Stacked names mod too
 //  - who's who: your own lines go over your own name (matched by user id from /api/me); a member's go
 //    over the .mate-name with their name. Someone not on the water in your zone gets no bubble (their
 //    line is still in the chat window)
@@ -543,12 +543,15 @@ const companyTalk = async () => {
     b.el.classList.remove('pop');
     void b.el.offsetWidth; // restart the pop
     b.el.classList.add('pop');
+    if (!raf) raf = requestAnimationFrame(frame);
   }
 
-  // Every frame: follow each bubble's name, hide it while the name is off screen, drop it when it's done
+  // Every frame while there are bubbles: follow each bubble's name, hide it while the name is off screen,
+  // drop it when it's done. With no bubbles the loop stops (showBubble starts it again), since reading
+  // where a name is makes the browser lay out the page first
   let raf = 0;
   function frame() {
-    raf = requestAnimationFrame(frame);
+    raf = bubbles.size ? requestAnimationFrame(frame) : 0;
     const now = performance.now();
     for (const [key, b] of bubbles) {
       if (now > b.until) {
@@ -568,7 +571,6 @@ const companyTalk = async () => {
         b.el.style.top = `${Math.round(r.top - 6)}px`;
       }
     }
-    placeBar();
   }
 
   // ---- Receiving: the chat stream ------------------------------------------------------------------
@@ -610,21 +612,44 @@ const companyTalk = async () => {
   document.body.append(bar);
   bar.hidden = !me.company;
 
+  // Placing the bar measures the page, which makes the browser lay it out first, so it's done only when
+  // something it sits by changes (the chat button, the chat window opening, closing or being resized, the
+  // game's area, the window), at most once a frame, and every 2 s in case something moved them unseen
+  let placeRaf = 0;
+  let placed = '';
   function placeBar() {
+    placeRaf = 0;
+    if (bar.hidden) return;
     const t = document.getElementById('chat-toggle');
     const chat = document.getElementById('chat');
     const r = t?.getBoundingClientRect();
     if (!r?.width) return;
     // Right of the chat button, or above the open chat window
     const c = chat && !chat.hidden ? chat.getBoundingClientRect() : null;
-    if (c?.width) {
-      bar.style.left = `${Math.round(c.left)}px`;
-      bar.style.top = `${Math.round(c.top - bar.offsetHeight - 6)}px`;
-    } else {
-      bar.style.left = `${Math.round(r.right + 8)}px`;
-      bar.style.top = `${Math.round(r.top + (r.height - bar.offsetHeight) / 2)}px`;
-    }
+    const [left, top] = c?.width
+      ? [c.left, c.top - bar.offsetHeight - 6]
+      : [r.right + 8, r.top + (r.height - bar.offsetHeight) / 2];
+    const at = `${Math.round(left)}px ${Math.round(top)}px`;
+    if (at === placed) return;
+    placed = at;
+    bar.style.left = `${Math.round(left)}px`;
+    bar.style.top = `${Math.round(top)}px`;
   }
+  const schedulePlace = () => {
+    if (!placeRaf && !bar.hidden) placeRaf = requestAnimationFrame(placeBar);
+  };
+  const sizes = new ResizeObserver(schedulePlace);
+  const attrs = new MutationObserver(schedulePlace);
+  for (const el of [bar, document.getElementById('chat-toggle'), document.getElementById('chat')]) {
+    if (!el) continue;
+    sizes.observe(el);
+    if (el !== bar) attrs.observe(el, { attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+  }
+  const area = document.getElementById('chat-toggle')?.parentElement;
+  if (area) sizes.observe(area);
+  addEventListener('resize', schedulePlace);
+  const placeTimer = setInterval(schedulePlace, 2000);
+  schedulePlace();
 
   function toast(text) {
     const t = document.createElement('div');
@@ -659,8 +684,6 @@ const companyTalk = async () => {
     }
   }
 
-  raf = requestAnimationFrame(frame);
-
   // For trying it out without sending anything: show a line as if it came in over company chat
   // (e.g. companyTalkPreview('*waves*'), or companyTalkPreview('hi', 'SomeMate') for a member on screen)
   window.companyTalkPreview = (text, name = null) =>
@@ -668,6 +691,11 @@ const companyTalk = async () => {
 
   window.stopCompanyTalk = () => {
     cancelAnimationFrame(raf);
+    cancelAnimationFrame(placeRaf);
+    clearInterval(placeTimer);
+    sizes.disconnect();
+    attrs.disconnect();
+    removeEventListener('resize', schedulePlace);
     clearTimeout(retry);
     es?.close();
     for (const b of bubbles.values()) b.el.remove();
