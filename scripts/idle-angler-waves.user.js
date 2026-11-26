@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Waves
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25
+// @version      2026-11-25.1
 // @description  Rolling waves on the water: none inland, building from the Coast to the Open Ocean, calming to still water in the Cosmic Void; boats sit in the water
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -1837,12 +1837,22 @@ bool occluded(vec2 p) {
       // keeps to the near water (hzn). How far from the horizon (which the haze and mist fade with): from the straight
       // horizon still, as the game has it, so a tall crest doesn't lift the haze in its column all the way up the sky,
       // which shows as a pale stripe over it.
+      // Only the background is hazed as water down from the far sea's top: what stands in front of it (boats, anglers,
+      // the Pond's shore) is hazed as the game hazes it, as above the water down to the near surface. Else the far sea's
+      // top cuts across each angler, hazed less below it than above, as if they were see-through. The background's
+      // pixels are the ones marked by their alpha (FAR_MARK, kept this far: the ripple leaves the picture above the
+      // water as it is, and the reflection draws nothing there).
       let main = body.slice(at);
       const SIDE = '(dy < 0.0 ? 1.0 : 0.55)';
+      const PIC = 'vec4 color = texture(uTexture, vTextureCoord);';
       main = main.includes(SIDE)
         ? main.replace(SIDE, '(coord.y < wtop ? 1.0 : 0.55)').replace(/coord\.y < uHorizon/g, 'coord.y < wtop').replace(/coord\.y > uHorizon/g, 'coord.y > hzn')
         : main.replace(/uHorizon/g, 'hzn');
-      main = main.replace(P, `${P}\n  float hzn = uHorizon - columnArt(p.x) * PX * uView.y / uDimensions.y; // the surface in this column\n  float wtop = min(hzn, farTop(p.x) / uDimensions.y); // the top of the water here, far sea and all`);
+      const top = main.indexOf(PIC) >= 0 && main.indexOf(PIC) < main.indexOf(P)
+        ? `color.a < ${(1 - 0.03 / 255).toFixed(6)} ? min(hzn, farTop(p.x) / uDimensions.y) : hzn`
+        : 'min(hzn, farTop(p.x) / uDimensions.y)';
+      if (!top.startsWith('color')) console.warn('[waves] The game’s light shader has changed: the far sea’s top may show across the anglers in haze');
+      main = main.replace(P, `${P}\n  float hzn = uHorizon - columnArt(p.x) * PX * uView.y / uDimensions.y; // the surface in this column\n  float wtop = ${top}; // the top of the water here: the far sea's, behind what stands in front`);
       // After the mist (or else the haze), where `hz` is the haze's strength here
       const after = [/\n  c = mix\(c, mistColor,[^\n]*\n/, /\n  c = mix\(c, uHazeColor,[^\n]*\n/].find((re) => re.test(main));
       if (after && /float hz = /.test(main)) main = main.replace(after, (m) => `${m.slice(0, -1)}${LIFT}\n`);
