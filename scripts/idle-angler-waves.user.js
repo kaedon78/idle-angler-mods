@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Waves
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25.1
+// @version      2026-11-26
 // @description  Rolling waves on the water: none inland, building from the Coast to the Open Ocean, calming to still water in the Cosmic Void; boats sit in the water
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -1044,8 +1044,10 @@ void main(void) {
   const SWAY_IDLE = 0.07; // radians it rocks on its own
   const buoySway = new Map(); // spot: its lean now (radians)
   let swayT = null;
+  const flagRects = []; // each flag's cloth this frame, in its buoy's Graphics (for the light shader: no rim light on it)
   const drawBuoys = (sc, rise, slope = () => 0) => {
     buoyLamps.length = 0;
+    flagRects.length = 0;
     const layer = sc?.actorLayer;
     if (!layer) return;
     if (buoyBox.parent !== layer) layer.addChildAt(buoyBox, 0);
@@ -1081,7 +1083,13 @@ void main(void) {
       g.rect(-PX, -13 * PX, 2 * PX, 8 * PX).fill({ color: 0x4a4a4a, alpha: a });
       g.rect(-2 * PX, -15 * PX, 4 * PX, 3 * PX).fill({ color, alpha: blink * a });
       const pole = drawFlagPole(g, 0, -15 * PX, { color, a, ...b });
-      if (pole) drawFlagCloth(g, 0, -15 * PX - pole, { color, a, ...b });
+      if (pole) {
+        drawFlagCloth(g, 0, -15 * PX - pole, { color, a, ...b });
+        const art = flagFor(b.kind);
+        const P = FLAG_SCALE * PX;
+        // (a pixel lower for the cloth's wave)
+        flagRects.push({ g, x0: 0, y0: -15 * PX - pole, x1: art[0].length * P, y1: -15 * PX - pole + (art.length + 1) * P, pad: P });
+      }
       const h = 13.5 * PX; // (the lamp, tilted with it)
       buoyLamps.push({ x: x + h * Math.sin(ang), y: base - h * Math.cos(ang), color, a, blink });
       // At night the flag glows: drawn again over the darkness (just the cloth and what's on it, nothing round it),
@@ -1817,7 +1825,17 @@ bool occluded(vec2 p) {
   for (int i = 0; i < 4; i++) if (inBox(uOccA[i], p) || inBox(uOccB[i], p)) return true;
   return false;
 }
+uniform mat4 uFlags; // the buoys' flags, each column (x0, y0, x1, y1) in screen px (none: all 0)
+bool onFlag(vec2 p) {
+  for (int i = 0; i < 4; i++) if (inBox(uFlags[i], p)) return true;
+  return false;
+}
 `;
+  // The game's rim light (warm light on the tops of ridges and trees, strongest with the sun low) lights a dark pixel
+  // above the horizon with a bright one just over it: on a flag, its dark text and icon under the bright cloth, and
+  // the row under the cloth, which washed them out in the sun's rose or orange. Not on the flags (FLAG_INK stays dark).
+  const NO_RIM = `
+  if (onFlag(p) || onFlag(p - vec2(0.0, 3.0 * uInputSize.w * uInputSize.y))) rim = 0.0;`;
   const LIFT = `
   if (uSurfAt.z > 0.0 && capAt(p) > 0.0 && !occluded(p)) {
     vec3 foamLit = vec3(0.96) * clamp(max(uHazeColor.r, max(uHazeColor.g, uHazeColor.b)) / 0.8, 0.35, 1.0);
@@ -1855,6 +1873,9 @@ bool occluded(vec2 p) {
       main = main.replace(P, `${P}\n  float hzn = uHorizon - columnArt(p.x) * PX * uView.y / uDimensions.y; // the surface in this column\n  float wtop = ${top}; // the top of the water here: the far sea's, behind what stands in front`);
       // After the mist (or else the haze), where `hz` is the haze's strength here
       const after = [/\n  c = mix\(c, mistColor,[^\n]*\n/, /\n  c = mix\(c, uHazeColor,[^\n]*\n/].find((re) => re.test(main));
+      const RIM = /\n  float rim = [^\n]*\n/;
+      if (RIM.test(main)) main = main.replace(RIM, (m) => `${m.slice(0, -1)}${NO_RIM}\n`);
+      else console.warn('[waves] The game’s light shader has changed: the rim light may wash out the buoys’ flags');
       if (after && /float hz = /.test(main)) main = main.replace(after, (m) => `${m.slice(0, -1)}${LIFT}\n`);
       else console.warn('[waves] The game’s light shader has changed: the wave caps may look dim in haze');
       shaftSource = head + main;
@@ -1875,6 +1896,7 @@ bool occluded(vec2 p) {
           ...waveUniforms(),
           uOccA: { value: new Float32Array(16), type: 'mat4x4<f32>' },
           uOccB: { value: new Float32Array(16), type: 'mat4x4<f32>' },
+          uFlags: { value: new Float32Array(16), type: 'mat4x4<f32>' },
           uFar: { value: new Float32Array(4), type: 'vec4<f32>' },
           uFarK: { value: new Float32Array(4), type: 'vec4<f32>' },
           uFarW: { value: new Float32Array(4), type: 'vec4<f32>' },
@@ -2195,6 +2217,16 @@ void main(void) {
       });
       su.uOccA.set(occ.subarray(0, 16));
       su.uOccB.set(occ.subarray(16));
+      // And the flags' (their cloth as drawn this frame, turned with the buoy, and a flag pixel round it)
+      const fl = new Float32Array(16);
+      flagRects.slice(0, 4).forEach(({ g, x0, y0, x1, y1, pad }, i) => {
+        if (!g.visible || !g.parent) return;
+        const pts = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => g.toGlobal({ x, y }));
+        const xs = pts.map((q) => q.x);
+        const ys = pts.map((q) => q.y);
+        fl.set([Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad], i * 4);
+      });
+      su.uFlags.set(fl);
     }
 
     // The background's mark (its alpha) has to last into the scene's picture: it is cleared to clear, not to the sky's
