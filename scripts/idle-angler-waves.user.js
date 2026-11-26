@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Waves
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-26.2
+// @version      2026-11-26.3
 // @description  Rolling waves on the water: none inland, building from the Coast to the Open Ocean, calming to still water in the Cosmic Void; boats sit in the water
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -1160,10 +1160,28 @@ void main(void) {
       glow.alpha = 0.8 * BUOY_LIGHT * k;
       pool.visible = glow.visible = true;
     });
-    // Other players' lanterns, as the game lights yours (atmosphere.js update, drawBloom), MATE_LIGHT as much
-    const f = (atmo.flicker ?? 1) * lit * MATE_LIGHT;
+    // Other players' lanterns, as the game lights yours (atmosphere.js update, drawBloom), MATE_LIGHT as much.
+    // Lights add up (the light map and the glows are both added), so where boats gather (a fishing spot, or one by
+    // yours) each lantern lights only what the ones already counted don't: yours and the dock's first, then the others
+    // in turn. One at the same place as another adds nothing, one CROWD_R or more away its whole light, and in between
+    // a share that eases in (each counted lantern by its own share). A lantern on its own is lit as before.
     const spread = 1 + (atmo.fogAmount ?? 0) * 0.5;
+    const reach = CROWD_R * spread;
+    const counted = [];
+    if ((atmo.boatGlow ?? 1) > 0.02 && atmo.lanternAt) counted.push({ ...atmo.lanternAt, w: Math.min(1, atmo.boatGlow ?? 1) });
+    if (atmo.dock) counted.push({ ...atmo.dock, w: 1 });
+    const shareOf = (l) => {
+      let k = 1;
+      for (const c of counted) {
+        const u = Math.min(1, Math.hypot(l.x - c.x, l.y - c.y) / reach);
+        k *= 1 - c.w * (1 - u * u * (3 - 2 * u));
+      }
+      return k;
+    };
     mateLamps.slice(0, mateLights.length).forEach((l, i) => {
+      const share = shareOf(l);
+      counted.push({ ...l, w: share });
+      const f = (atmo.flicker ?? 1) * lit * MATE_LIGHT * share;
       haze.circle(l.x, l.y, 46 * fog).fill({ color: LANTERN_LIGHT, alpha: (0.3 + (atmo.fogAmount ?? 0) * 0.2) * f });
       wide.circle(l.x, l.y, 20 * fog).fill({ color: LANTERN_LIGHT, alpha: 0.75 * f });
       tight.circle(l.x, l.y, 8).fill({ color: LANTERN_CORE, alpha: MATE_CORE * f }); // (the core dimmer: the glass shows)
@@ -1192,6 +1210,7 @@ void main(void) {
   // yours (drawLampGlow, above).
   const MATE_LIGHT = 0.6; // how much another boat's lantern lights the night, to yours
   const MATE_CORE = 0.4; // its bloom's bright core, to the game's (at full it washes the glass out to white)
+  const CROWD_R = 170; // world units: lanterns closer than this share their light (about the light's pool, 360 across)
   const MAX_MATE_LAMPS = 12; // scene.js MAX_MATES: other boats drawn at once
   const LANTERN_LIGHT = 0xffa04a; // atmosphere.js: the lantern's light and its core
   const LANTERN_CORE = 0xffd890;
