@@ -82,9 +82,11 @@ tab until the page is reloaded.
 - **Weather forecast:** click the time and weather in the top bar, or press W.
 - **Gear judge:** ▲ / ▼ on gear, judged over a whole day of weather or the time and weather you pick.
 - **Quicklinks:** a sidebar on the right edge, with a panel of what most needs you right now. It shows the
-  Income pills, the forecast, the Gear judge's picks and the build keys when those mods are on too.
+  Income pills, the forecast, the Gear judge's picks and the build keys when those mods are on too. Drag
+  the panel's left edge to resize it; double-click the edge for its usual width.
 - **Left-hand layout:** the sidebar on the left, windows sliding out from there, no pages in Upgrades and
-  Perks.
+  Perks. Drag a window's right edge to resize it (every window then opens at that width); double-click the
+  edge for the usual width.
 - **Stacked names:** names on the water that would overlap stack in a column by gold leaderboard rank,
   with rank badges.
 - **Company online:** a green dot by each company member online now, in the Company window.
