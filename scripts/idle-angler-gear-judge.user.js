@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Gear Judge
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25
+// @version      2026-11-26
 // @description  ▲ / ▼ on gear judged over a whole day of weather, or the time and weather you pick
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -619,6 +619,27 @@ const gearJudge = async () => {
   }
 
   // ---------- Judging ----------
+  // Your stats as they stand, with what you wear, apart from gear: upgrades, perks, levels, ascensions, mastery and the
+  // rest all show in them. Worked out as the judging does (an hour ahead, so bonuses ending sooner are left out), in
+  // one fixed time and weather, each stat to about 0.2% (badges go by ½%). At most every STATS_MS. Counters that move
+  // with every catch and that no gear changes are left out (gearDry: catches since gear last dropped).
+  const STATS_MS = 2000;
+  const NOT_STATS = new Set(['gearDry']);
+  let statsSeen = { at: -Infinity, sig: '' };
+  function statsSig() {
+    const t = performance.now();
+    if (t - statsSeen.at < STATS_MS) return statsSeen.sig;
+    const s = under(SHARES[0], () => S.statsWithBonus('value', 0));
+    const nums = Object.entries(s)
+      .filter(([k, v]) => typeof v === 'number' && !NOT_STATS.has(k))
+      .map(([k, v]) => `${k}:${v > 0 ? Math.round(Math.log(v) * 500) : v}`);
+    statsSeen = { at: t, sig: `${nums.join(',')}|${JSON.stringify(s.flags ?? {})}` };
+    return statsSeen.sig;
+  }
+  // How you click (as you click now): the idle share it's judged with stays until your play moves IDLE_STEP from it,
+  // so a click rate easing off as you stop clicking doesn't judge everything again at every step on the way
+  const IDLE_STEP = 0.1;
+  let held = null; // { idle, cps }
   let ctx = null; // what this pass is judged with; a new one when any of it changes
   function context() {
     let idle = 1; // the share of the time with no click for 3 s
@@ -630,6 +651,8 @@ const gearJudge = async () => {
       const rate = S.clickRate();
       idle = Math.exp(-IDLE_S * rate);
       cps = Math.min(MAX_CPS, rate / Math.max(1e-6, 1 - idle));
+      if (!held || Math.abs(idle - held.idle) >= IDLE_STEP || (idle === 1) !== (held.idle === 1)) held = { idle, cps };
+      ({ idle, cps } = held);
     }
     const now = W.worldAt();
     const chests = pick.activity === 'chests';
@@ -646,8 +669,8 @@ const gearJudge = async () => {
       JSON.stringify(S.state.equipped),
       JSON.stringify(S.buildPriority()),
       JSON.stringify(S.state.settings.statLimits ?? {}),
-      Math.round(idle * 20), // a 5% step in idle play
-      Math.floor(Date.now() / 60_000), // upgrades, perks and levels bought: once a minute
+      idle, // (held, above)
+      statsSig(), // upgrades, perks, levels and the rest
     ].join('|');
     if (ctx?.sig === sig) return ctx;
     const conds = conditions();
