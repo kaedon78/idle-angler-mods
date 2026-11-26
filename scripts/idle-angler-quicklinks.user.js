@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Quicklinks
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25
+// @version      2026-11-25.1
 // @description  A sidebar on the right edge, with a panel of what most needs you right now
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -18,7 +18,9 @@
 // to make room beside it (nothing is covered); the scene stays where it is at its full size, its right edge
 // under the panel (the catch feed and the right sail tab come in), so the view doesn't move about as it
 // slides; out on the water the camera eases your angler over to the middle of the part you see, and the
-// big announcements ("Legendary!") show there too. The button again, or the panel's ✕, puts it away. The panel shows:
+// big announcements ("Legendary!") show there too. The button again, or the panel's ✕, puts it away. Drag the
+// panel's left edge to make it wider or narrower (double-click the edge to have it fit the bounty names again).
+// The panel shows:
 //  - At the top, the weather now (the forecast mod draws it; a click opens the forecast)
 //  - Min-maxer: the income pills (that mod puts them here while both run), and under
 //    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
@@ -486,6 +488,145 @@ function chestBaseRule({ rollChestContents, RARITIES, CHEST_GOLD, ZONES, stats }
   const base = gold / (RARITIES[tier].valueMult * CHEST_GOLD * stats.valueMult * (stats.chestValueMult ?? 1));
   const multiplies = Math.abs(base - (stats.fishValue ?? 1) * zone.baseValue) < Math.abs(base - (stats.fishValue ?? zone.baseValue));
   return (s, z) => (multiplies ? (s.fishValue ?? 1) * z.baseValue : s.fishValue ?? z.baseValue);
+}
+
+// =====================================================================================================
+// Shared by Quicklinks and the Left-hand layout: a grip on a docked panel's inner edge that resizes it
+//
+// Each panel's width is a CSS variable on the page (Quicklinks --qs-w, the left slideout --ll-w) that the page,
+// the scene and the camera's centre already follow, so the grip only sets that variable. The grip is its own
+// element on the page, not part of the panel (the game redraws its windows' insides), held on the panel's edge
+// by the same variable and shown only while the panel is out (`openClass` on the body).
+// Drag it, or focus it and press ← / →. Let go and the width is remembered in this browser (`key`); a double
+// click forgets it and goes back to the panel's usual width (`onReset`). While dragging, the page's slide
+// transitions are off, so everything follows the pointer, and the game is told of the resize each frame (it
+// measures its play area on resize). The width is capped to a share of the window (`max`) as the window shrinks
+// too, and a drag stops KEEP px short of a panel out on the other side, so the scene is never squeezed away
+// between them. Nothing goes to the server.
+// =====================================================================================================
+function edgeGrip({ id, edge, openClass, cssVar, key, min, max, label, onSize = () => {}, onReset = () => {} }) {
+  document.getElementById(id)?.remove();
+  document.getElementById(`${id}-style`)?.remove();
+  const root = document.documentElement;
+  const STEP = 16; // px a key press moves it
+  const KEEP = 400; // px of the scene kept between this panel and one out on the other side
+  // How wide it can go: up to the other side's grip (the other panel's edge), less KEEP, if that one is out
+  const room = () => {
+    const other = [...document.querySelectorAll('.ia-grip')].find((g) => g.dataset.edge !== edge && getComputedStyle(g).display !== 'none');
+    if (!other) return Infinity;
+    const r = other.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    return (edge === 'left' ? x : innerWidth - x) - KEEP;
+  };
+  const clamp = (w) => Math.round(Math.max(min, Math.min(innerWidth * max, room(), w)));
+  const apply = (w) => {
+    root.style.setProperty(cssVar, `min(${w}px, ${max * 100}vw)`);
+    onSize(w);
+  };
+  let size = null; // the width set with the grip (px), or null: the panel's own
+  try {
+    const saved = Number(localStorage.getItem(key));
+    if (saved >= min) size = saved;
+  } catch {
+    // storage blocked: the usual width
+  }
+  if (size) apply(size);
+
+  const style = document.createElement('style');
+  style.id = `${id}-style`;
+  // The grip straddles the panel's edge: 10px to catch, a 2px line in the middle while hovered or dragged
+  const at = edge === 'left' ? `left:calc(var(${cssVar}) - 5px)` : `right:calc(var(${cssVar}) - 5px)`;
+  style.textContent = `
+#${id}{position:fixed;${at};top:44px;bottom:0;width:10px;z-index:900;display:none;cursor:ew-resize;touch-action:none;
+  background:linear-gradient(90deg,transparent 4px,var(--ia-grip,transparent) 4px,var(--ia-grip,transparent) 6px,transparent 6px)}
+body.${openClass} #${id}{display:block}
+#${id}:hover,#${id}:focus-visible,body.ia-grip-drag #${id}{--ia-grip:rgba(253,230,138,.55);outline:none}
+body.ia-grip-drag,body.ia-grip-drag *{transition:none !important;animation:none !important;cursor:ew-resize !important;user-select:none !important}`;
+  document.head.append(style);
+
+  const grip = document.createElement('div');
+  grip.id = id;
+  grip.className = 'ia-grip';
+  grip.dataset.edge = edge;
+  grip.tabIndex = 0;
+  grip.setAttribute('role', 'separator');
+  grip.setAttribute('aria-orientation', 'vertical');
+  grip.setAttribute('aria-label', `Width of ${label}`);
+  grip.title = `Drag to change the width of ${label} (← / → too). Double-click for its usual width.`;
+  document.body.append(grip);
+
+  // The game measures its play area on resize: once a frame at most while the width changes
+  let frame = 0;
+  const tellGame = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      dispatchEvent(new Event('resize'));
+    });
+  };
+  const save = () => {
+    try {
+      if (size) localStorage.setItem(key, String(size));
+      else localStorage.removeItem(key);
+    } catch {
+      // storage blocked: the width lasts until the page reloads
+    }
+  };
+  const set = (w) => {
+    size = clamp(w);
+    apply(size);
+    tellGame();
+  };
+  const widthAt = (x) => (edge === 'left' ? x : innerWidth - x);
+
+  let dragging = null; // the pointer's id
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragging = e.pointerId;
+    grip.setPointerCapture(e.pointerId);
+    document.body.classList.add('ia-grip-drag');
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (e.pointerId === dragging) set(widthAt(e.clientX));
+  });
+  const end = (e) => {
+    if (e.pointerId !== dragging) return;
+    dragging = null;
+    document.body.classList.remove('ia-grip-drag');
+    save();
+    dispatchEvent(new Event('resize'));
+  };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => {
+    size = null;
+    save();
+    root.style.removeProperty(cssVar);
+    onReset();
+    dispatchEvent(new Event('resize'));
+  });
+  grip.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    e.stopPropagation(); // not the game's hotkeys
+    const r = grip.getBoundingClientRect();
+    const now = size ?? widthAt(r.left + r.width / 2); // (the grip's middle is the panel's edge)
+    const wider = (e.key === 'ArrowRight') === (edge === 'left');
+    set(now + (wider ? STEP : -STEP));
+    save();
+  });
+
+  return {
+    get size() { return size; }, // the width set with the grip (px), or null
+    remove() {
+      cancelAnimationFrame(frame);
+      document.body.classList.remove('ia-grip-drag');
+      grip.remove();
+      style.remove();
+    },
+  };
 }
 
 // =====================================================================================================
@@ -1367,9 +1508,20 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
   }
 
   // Widen (or narrow) the panel by what the longest bounty name lacks (or has to spare). Each name's text
-  // is in an inline .qs-fit, so its own width is the width it needs on one line.
+  // is in an inline .qs-fit, so its own width is the width it needs on one line. Not while it has a width
+  // set with the grip on its left edge (double-click the grip to go back to this)
   let width = MIN_W;
+  const grip = edgeGrip({
+    id: 'qs-grip', edge: 'right', openClass: 'qs-open', cssVar: '--qs-w', key: 'idle-angler-quicklinks-width',
+    min: 340, max: 0.7, label: 'Quicklinks',
+    onReset: () => {
+      width = MIN_W;
+      document.documentElement.style.setProperty('--qs-w', `min(${MIN_W}px, 85vw)`);
+      fitWidth();
+    },
+  });
   function fitWidth() {
+    if (grip.size) return;
     const lines = [...panel.querySelectorAll('.bounty-row .qs-line')].filter((l) => l.offsetParent);
     if (!lines.length) return;
     let spare = Infinity;
@@ -1456,6 +1608,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     removeEventListener('resize', placeBar);
     removeEventListener('idle-angler-gear-judge', onJudge);
     barObserver.disconnect();
+    grip.remove();
     host.remove();
     bar.remove();
     style.remove();

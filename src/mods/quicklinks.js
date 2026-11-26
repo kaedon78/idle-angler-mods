@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Idle Angler Quicklinks
-// @version      2026-11-25
+// @version      2026-11-25.1
 // @description  A sidebar on the right edge, with a panel of what most needs you right now
 // @shared       view-centre
 // @shared       chest-base
+// @shared       edge-grip
 // ==/UserScript==
 
 // =====================================================================================================
@@ -14,7 +15,9 @@
 // to make room beside it (nothing is covered); the scene stays where it is at its full size, its right edge
 // under the panel (the catch feed and the right sail tab come in), so the view doesn't move about as it
 // slides; out on the water the camera eases your angler over to the middle of the part you see, and the
-// big announcements ("Legendary!") show there too. The button again, or the panel's ✕, puts it away. The panel shows:
+// big announcements ("Legendary!") show there too. The button again, or the panel's ✕, puts it away. Drag the
+// panel's left edge to make it wider or narrower (double-click the edge to have it fit the bounty names again).
+// The panel shows:
 //  - At the top, the weather now (the forecast mod draws it; a click opens the forecast)
 //  - Min-maxer: the income pills (that mod puts them here while both run), and under
 //    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
@@ -836,9 +839,20 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
   }
 
   // Widen (or narrow) the panel by what the longest bounty name lacks (or has to spare). Each name's text
-  // is in an inline .qs-fit, so its own width is the width it needs on one line.
+  // is in an inline .qs-fit, so its own width is the width it needs on one line. Not while it has a width
+  // set with the grip on its left edge (double-click the grip to go back to this)
   let width = MIN_W;
+  const grip = edgeGrip({
+    id: 'qs-grip', edge: 'right', openClass: 'qs-open', cssVar: '--qs-w', key: 'idle-angler-quicklinks-width',
+    min: 340, max: 0.7, label: 'Quicklinks',
+    onReset: () => {
+      width = MIN_W;
+      document.documentElement.style.setProperty('--qs-w', `min(${MIN_W}px, 85vw)`);
+      fitWidth();
+    },
+  });
   function fitWidth() {
+    if (grip.size) return;
     const lines = [...panel.querySelectorAll('.bounty-row .qs-line')].filter((l) => l.offsetParent);
     if (!lines.length) return;
     let spare = Infinity;
@@ -925,6 +939,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     removeEventListener('resize', placeBar);
     removeEventListener('idle-angler-gear-judge', onJudge);
     barObserver.disconnect();
+    grip.remove();
     host.remove();
     bar.remove();
     style.remove();

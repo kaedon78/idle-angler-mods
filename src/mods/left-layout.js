@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Idle Angler Left-hand Layout
-// @version      2026-11-25
+// @version      2026-11-25.1
 // @description  The sidebar on the left, windows sliding out from there, no pages in Upgrades and Perks
-// @shared       view-centre
+// @shared       view-centre edge-grip
 // ==/UserScript==
 
 // =====================================================================================================
@@ -18,7 +18,9 @@
 //    ("Legendary!") show there too. A narrower picture
 //    would have the game lay its scene out again for the new width, which moves the whole view about on
 //    every frame of the slide. One window shows at a time: opening
-//    another swaps it in. Close it (✕, Esc or its button again) and the game slides back.
+//    another swaps it in. Close it (✕, Esc or its button again) and the game slides back. Drag the window's
+//    right edge to make it wider or narrower (every window then opens at that width; double-click the edge
+//    for the usual 380px).
 //    A window you undock floats over the game as before, and one you've pinned opens in its spot. The
 //    Weather forecast mod's window slides out here too.
 //  - Upgrades and Perks list every card on one page instead of five at a time
@@ -88,6 +90,11 @@ const leftLayout = async () => {
 @keyframes ll-slide{from{transform:translateX(-100%)}}
 @media (prefers-reduced-motion:reduce){#app,#stage > #game,#scene-hud > .catch-feed{transition:none}body #windows > .window:not(.floating){animation:none}}`;
   document.head.append(style);
+  // A grip on the docked window's right edge sets its width for every window (double-click it for WIDTH again)
+  const grip = edgeGrip({
+    id: 'll-grip', edge: 'left', openClass: 'll-open', cssVar: '--ll-w', key: 'idle-angler-left-width',
+    min: 300, max: 0.6, label: 'the window',
+  });
 
   const wide = matchMedia(WIDE);
   const docked = () => [...layer.querySelectorAll(':scope > .window:not(.floating):not([hidden])')];
@@ -254,6 +261,8 @@ const leftLayout = async () => {
     layer.removeEventListener('scroll', onScroll, true);
     cancelAnimationFrame(slideFrame);
     document.body.classList.remove('ll-open');
+    grip.remove();
+    document.documentElement.style.removeProperty('--ll-w');
     style.remove();
     viewCentre.remove('leftLayout');
     dispatchEvent(new Event('resize'));
