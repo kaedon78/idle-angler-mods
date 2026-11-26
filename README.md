@@ -116,10 +116,9 @@ Boats in the water, hotspot buoys, lantern gauges and other players' lanterns ca
 Waves in Settings > Mods.
 
 It needs the game's **shaders** on (Settings), the same as the game's own ripples and reflections; with
-them off the water and boats are the game's own. A **Waves** tab on the left opens a test panel to try
-different sea sizes (time of day and weather controls appear there only on a local test copy of the
-game). In the console, `waves.panel = false` hides it, and `waves.force = 0.8` tries a wave size anywhere
-(`waves.force = null` goes back to normal).
+them off the water and boats are the game's own. In the console, `waves.force = 0.8` tries a wave size
+anywhere (`waves.force = null` goes back to normal). On a local test copy of the game, a **Waves** tab on
+the left opens a test panel for the sea size, time of day and weather (`waves.panel = false` hides it).
 
 ### Company Talk (`idle-angler-company-talk.user.js`)
 
