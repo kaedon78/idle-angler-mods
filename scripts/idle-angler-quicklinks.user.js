@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Quicklinks
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-26
+// @version      2026-11-26.1
 // @description  A sidebar on the right edge, with a panel of what most needs you right now
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -24,13 +24,13 @@
 //  - At the top, the weather now (the forecast mod draws it; a click opens the forecast)
 //  - Min-maxer: the income pills (that mod puts them here while both run), and under
 //    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
-//  - Builds: the 6 pieces of gear you're wearing (click one to take it off, as on the paper doll), then
+//  - Gear: the 6 pieces of gear you're wearing (click one to take it off, as on the paper doll), then
 //    your saved gear sets; click one to put it on (its number key does too, with the build switcher on),
 //    ⟳ saves what you're wearing over it, ✕ deletes it, and "+ Save what you're wearing" adds a new one
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
 //  - Ascend: how many times you've ascended, progress toward the next ascension (or the Oracle's target),
 //    and the Oracle's "ascend for me" as buttons (Off, 1x-10x) beside the Ascend button
-//  - Foreman: the upgrade it buys next (as the Upgrades window draws it, with its buy button), and what
+//  - Upgrades: the upgrade the Foreman buys next (as the Upgrades window draws it, with its buy button), and what
 //    it's buying (off, save up for the top of the list, or the next one you can afford)
 //  - Chests: how many you have, what opening them all now pays on average, and Open all
 //  - Bag: how full your bag is, then only the gear that's better for your build than what you're wearing
@@ -932,16 +932,16 @@ const summaryPanel = async () => {
     const nextRow = up
       ? upgradeRowHtml(up)
       : listed
-        ? '<p class="muted small-text">Everything on its list is maxed</p>'
+        ? `<p class="muted small-text">Everything on the foreman's list is maxed</p>`
         : '';
-    return `${nextRow}<label class="setting-select">Buying <select data-change="autoup-mode" aria-label="How Foreman buys upgrades">${[
+    return `${nextRow}<label class="setting-select">Buying <select data-change="autoup-mode" aria-label="How the foreman buys upgrades">${[
       ['off', 'Off'],
       ['save', 'Save up for the top of the list'],
       ['next', 'Buy the next one I can afford'],
     ]
       .map(([v, label]) => `<option value="${v}" ${mode === v ? 'selected' : ''}>${label}</option>`)
       .join('')}</select></label>
-      <p class="muted small-text">${listed ? `${listed} upgrade${listed === 1 ? '' : 's'} on its list` : 'Its list is empty: nothing is bought'} · <button class="goto" data-action="goto" data-panel="automation">Change the list <span class="goto-arrow">→</span></button></p>`;
+      <p class="muted small-text">${listed ? `${listed} upgrade${listed === 1 ? '' : 's'} on the foreman's list` : "The foreman's list is empty: nothing is bought"} · <button class="goto" data-action="goto" data-panel="automation">Change the list <span class="goto-arrow">→</span></button></p>`;
   }
 
   // ---------- The best +10% (the Min-maxer's Gains tab, minmax-ui.js renderGains) ----------
@@ -1332,10 +1332,10 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     // The income pills mod moves its pills into #qs-pills (it listens for idle-angler-quicklinks);
     // this section draws only the best +10% (.qs-gains), which CSS orders between them
     { id: 'stats', title: 'Min-maxer', panel: 'minmax', html: gainsHtml },
-    { id: 'character', title: 'Builds', panel: 'character', html: buildsHtml, count: () => `${(S.state.gearSets ?? []).length}/${GEAR_SETS.max}` },
+    { id: 'character', title: 'Gear', panel: 'character', html: buildsHtml, count: () => `${(S.state.gearSets ?? []).length}/${GEAR_SETS.max}` },
     { id: 'bounties', title: 'Bounties', panel: 'bounties', html: bountiesHtml, count: () => { const n = finishedBounties(); return n ? `${n} to claim` : ''; } },
     { id: 'ascend', title: 'Ascend', panel: 'ascend', html: ascendHtml },
-    { id: 'foreman', title: 'Foreman', panel: 'automation', html: foremanHtml },
+    { id: 'foreman', title: 'Upgrades', panel: 'automation', html: foremanHtml },
     { id: 'chests', title: 'Chests', panel: 'chests', html: chestsHtml },
     { id: 'gear', title: 'Bag', panel: 'bags', html: gearHtml, count: () => { const n = upgrades().length; const g = setGroups().length; return [n ? String(n) : '', g ? `${g} set${g === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '); } },
     { id: 'market', title: 'Market', panel: 'market', html: marketHtml, count: marketCount },
@@ -1594,7 +1594,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     toggle.classList.toggle('active', open);
     toggle.setAttribute('aria-expanded', String(open));
     toggle.setAttribute('aria-label', open ? 'Hide Quicklinks' : 'Show Quicklinks');
-    toggle.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, the best +10%, builds, bounties, ascending, Foreman, chests and gear upgrades';
+    toggle.title = open ? 'Hide Quicklinks' : 'Show Quicklinks: income a second, the best +10%, gear, bounties, ascending, upgrades, chests and gear upgrades';
     panel.inert = !open;
     if (remember) {
       try {
