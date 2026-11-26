@@ -27,7 +27,7 @@ The scripts are in [`scripts/`](scripts):
 | [`idle-angler-smooth-resize.user.js`](scripts/idle-angler-smooth-resize.user.js) | Smooth resizing: no light-blue flashes while the game resizes |
 | [`idle-angler-fog-to-edge.user.js`](scripts/idle-angler-fog-to-edge.user.js) | Fog to the edge: in fog the haze covers the whole screen |
 | [`idle-angler-spots-on-time.user.js`](scripts/idle-angler-spots-on-time.user.js) | Spots on time: a new fishing spot fades in when it appears |
-| [`idle-angler-waves.user.js`](scripts/idle-angler-waves.user.js) | Waves: rolling waves, a far sea, boats in the water, hotspot buoys, lantern gauges |
+| [`idle-angler-waves.user.js`](scripts/idle-angler-waves.user.js) | Waves: rolling waves, a far sea, boats in the water, hotspot buoys, lantern gauges, other players' lanterns |
 | [`idle-angler-company-talk.user.js`](scripts/idle-angler-company-talk.user.js) | Company Talk: speech bubbles and emotes over your company's anglers |
 | [`idle-angler-perf.user.js`](scripts/idle-angler-perf.user.js) | Performance: lower CPU use for computers without graphics acceleration |
 
@@ -108,8 +108,12 @@ tab until the page is reloaded.
   lamp glows and the flag stays readable.
 - **Lantern gauges:** a second lantern on the stern. The two lanterns fill with the bite wait and the
   Frenzy, in place of the game's bars.
+- **Other players' lanterns:** every other boat carries the game's lantern on its stern too, lit at dusk,
+  at night and in gloomy weather, so other players don't sail dark. Their light is a little dimmer than
+  yours.
 
-Boats in the water, hotspot buoys and lantern gauges can each be switched off under Waves in Settings > Mods.
+Boats in the water, hotspot buoys, lantern gauges and other players' lanterns can each be switched off under
+Waves in Settings > Mods.
 
 It needs the game's **shaders** on (Settings), the same as the game's own ripples and reflections; with
 them off the water and boats are the game's own. A **Waves** tab on the left opens a test panel to try
