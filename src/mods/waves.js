@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Idle Angler Waves
-// @version      2026-11-26
+// @version      2026-11-26.1
 // @description  Rolling waves on the water: none inland, building from the Coast to the Open Ocean, calming to still water in the Cosmic Void; boats sit in the water
 // ==/UserScript==
 
@@ -47,9 +47,11 @@
 // (in still water the far sea is flat), and it never moves; a trough in the near waves shows the far rows.
 // All of this only runs with the game's shaders on (Settings), the same as its ripples and reflections; with
 // them off the boats and water are the game's own.
-// In Settings > Mods (under Waves) three parts can be switched off on their own, each then left as the game draws it:
-// the boats sitting in the water, the hotspot buoys and their flags, and the lantern gauges. (The far sea is part of
-// how the water, its reflection and its haze are drawn, so it stays.)
+// Other players' boats carry a lantern on the stern as yours does (the game gives them none, so at night they sail
+// dark): the game's own lantern, lit with yours at dusk and in gloom, lighting the night round it a little less.
+// In Settings > Mods (under Waves) four parts can be switched off on their own, each then left as the game draws it:
+// the boats sitting in the water, the hotspot buoys and their flags, the lantern gauges, and other players' lanterns.
+// (The far sea is part of how the water, its reflection and its haze are drawn, so it stays.)
 // Nothing changes in the game's state, and nothing goes to the server.
 //
 // In the console:  waves.intensity      how big the waves are now (0 still, 1 the Open Ocean)
@@ -80,6 +82,7 @@ const waves = async () => {
   const BOATS = part('boats'); // boats sit in the water (off: they ride the waves on top of it, as the game draws them)
   const BUOYS = part('buoys'); // a buoy with a flag at each spot, in place of its label
   const GAUGES = part('gauges'); // the bite and Frenzy as lanterns, in place of the game's bars
+  const LANTERNS = part('lanterns'); // a lantern on other players' boats too, lit at night as yours is
 
   // ---------- Where the waves are ----------
   // Along the world: a water's index plus how far along it you are (0..1), so the Coast's far end is 3.99.
@@ -730,10 +733,86 @@ void main(void) {
       glow.alpha = 0.8 * BUOY_LIGHT * k;
       pool.visible = glow.visible = true;
     });
+    // Other players' lanterns, as the game lights yours (atmosphere.js update, drawBloom), MATE_LIGHT as much
+    const f = (atmo.flicker ?? 1) * lit * MATE_LIGHT;
+    const spread = 1 + (atmo.fogAmount ?? 0) * 0.5;
+    mateLamps.slice(0, mateLights.length).forEach((l, i) => {
+      haze.circle(l.x, l.y, 46 * fog).fill({ color: LANTERN_LIGHT, alpha: (0.3 + (atmo.fogAmount ?? 0) * 0.2) * f });
+      wide.circle(l.x, l.y, 20 * fog).fill({ color: LANTERN_LIGHT, alpha: 0.75 * f });
+      tight.circle(l.x, l.y, 8).fill({ color: LANTERN_CORE, alpha: MATE_CORE * f }); // (the core dimmer: the glass shows)
+      const [pool, glow] = mateLights[i];
+      pool.position.set(l.x, l.y + 20);
+      pool.width = 360 * spread;
+      pool.height = 330 * spread;
+      pool.tint = LANTERN_LIGHT;
+      pool.alpha = 0.9 * f;
+      glow.position.set(l.x, l.y);
+      glow.width = glow.height = 90;
+      glow.tint = LANTERN_CORE;
+      glow.alpha = 0.8 * f;
+      pool.visible = glow.visible = true;
+    });
   };
   const hideLampGlow = () => {
     for (const g of lampBloom) g.parent.visible = false;
-    for (const pair of lampLights) for (const s of pair) s.visible = false;
+    for (const pair of [...lampLights, ...mateLights]) for (const s of pair) s.visible = false;
+  };
+
+  // ---------- Other players' lanterns ----------
+  // Your lantern stands on a post at your boat's stern (scene.js placeRowboat, atmosphere.js paintLantern); other
+  // players' boats (scene.js makeMateRig) have none. Each gets the game's own, painted by the game's paintLantern into
+  // the boat's rig, behind the oar, so it turns round, floats and pitches with the boat, and lit as the game lights
+  // yours (drawLampGlow, above).
+  const MATE_LIGHT = 0.6; // how much another boat's lantern lights the night, to yours
+  const MATE_CORE = 0.4; // its bloom's bright core, to the game's (at full it washes the glass out to white)
+  const MAX_MATE_LAMPS = 12; // scene.js MAX_MATES: other boats drawn at once
+  const LANTERN_LIGHT = 0xffa04a; // atmosphere.js: the lantern's light and its core
+  const LANTERN_CORE = 0xffd890;
+  const STERN = { lanternX: 3, lanternSink: 3, gunwale: 5 }; // scene.js ROWBOAT: the post, from the stern (art px)
+  const mateLanterns = new Map(); // a boat's rig (scene.mateRigs' r) -> its lantern (a Graphics in r.rig)
+  const mateLamps = []; // this frame's glasses, in the scene
+  const mateLights = []; // per lantern: its pool and its core, in the light map
+  // Paints a boat's lantern where its hull is now (before it pitches) and returns it, with its glass in the rig
+  const mateLantern = (sc, r) => {
+    let g = mateLanterns.get(r);
+    if (!g || g.destroyed || g.parent !== r.rig) {
+      g = new Graphics();
+      r.rig.addChildAt(g, r.rig.getChildIndex(r.boat) + 1);
+      mateLanterns.set(r, g);
+    }
+    // (as placeRowboat: the glass 6 px right of the post and 15.5 px above its base, sunk into the hull)
+    const at = { x: r.boat.x + (STERN.lanternX + 6) * PX, y: r.boat.y + (STERN.gunwale + STERN.lanternSink - 15.5) * PX };
+    g.visible = true;
+    sc.atmo.paintLantern(g.clear(), at, 'post', sc.atmo.lit ?? 0);
+    return { g, at };
+  };
+  // The lanterns of boats gone from the scene, and the lights left over
+  const tidyLanterns = (sc) => {
+    for (const [r, g] of mateLanterns) {
+      if (r.rig.destroyed || g.destroyed || ![...(sc?.mateRigs?.values() ?? [])].includes(r)) {
+        if (!g.destroyed) g.destroy();
+        mateLanterns.delete(r);
+      }
+    }
+    const atmo = sc?.atmo;
+    if (!atmo?.lights || !atmo.light) return;
+    while (mateLights.length < MAX_MATE_LAMPS) {
+      mateLights.push([0, 1].map(() => {
+        const s = new Sprite(atmo.light);
+        s.anchor.set(0.5);
+        s.blendMode = 'add';
+        return s;
+      }));
+    }
+    for (const pair of mateLights) for (const s of pair) {
+      if (s.parent !== atmo.lights) atmo.lights.addChild(s);
+      s.visible = false;
+    }
+  };
+  const hideLanterns = () => {
+    for (const g of mateLanterns.values()) if (!g.destroyed) g.visible = false;
+    for (const pair of mateLights) for (const s of pair) s.visible = false;
+    mateLamps.length = 0;
   };
   const hookSpots = (sc) => {
     if (spotsHooked === sc || typeof sc?.drawSpots !== 'function') return;
@@ -1570,6 +1649,7 @@ void main(void) {
     spotHaze.visible = false;
     if (scene) drawBuoys(scene, () => 0); // (on the game's flat water)
     hideLampGlow();
+    hideLanterns(); // (other boats as the game has them)
     if (mistSprite) mistSprite.visible = false;
   };
   // Your hull and oar, and other players'
@@ -1712,7 +1792,9 @@ void main(void) {
       poked.push([o, scene.bgLayer.getChildIndex(o)]);
       scene.worldLayer.addChildAt(o, poked.length - 1);
     }
-    // Other players' boats
+    // Other players' boats, and their lanterns
+    tidyLanterns(scene);
+    mateLamps.length = 0;
     for (const r of scene.mateRigs?.values() ?? []) {
       if (!r.rig.visible || !r.boat) continue;
       const mid = r.rig.x + r.rig.scale.x * (r.boat.x + r.boat.width / 2);
@@ -1721,8 +1803,10 @@ void main(void) {
       const [x0, x1] = [mid - r.boat.width / 2, mid + r.boat.width / 2];
       const f = floatArt(m.float, s ? hullArt(x0, x1) : 0, dt);
       const rise = floatArt(m.pitch, s ? pitchArt(x0, x1) : 0, dt, PITCH_S);
+      const lantern = LANTERNS && scene.atmo ? mateLantern(scene, r) : null; // (where the hull is, before it pitches)
       lift(r.rig, (f - SINK) * PX);
-      pitch(r.rig, r.boat, [r.boat, r.oar], rise);
+      const turn = pitch(r.rig, r.boat, [r.boat, r.oar, lantern?.g], rise);
+      if (lantern) mateLamps.push(turn({ x: r.rig.x + r.rig.scale.x * lantern.at.x, y: r.rig.y + lantern.at.y }));
       if (hullsNow.length < 4) hullsNow.push(hullOf(r.rig, r.boat, f, rise));
     }
     if (!hullUp) hullsNow = [];
@@ -2150,7 +2234,9 @@ void main(void) {
     gaugeStyle?.remove();
     gaugeStyle = null;
     for (const g of lampBloom) g.parent.destroy({ children: true });
-    for (const pair of lampLights) for (const s of pair) s.destroy();
+    for (const pair of [...lampLights, ...mateLights]) for (const s of pair) s.destroy();
+    for (const g of mateLanterns.values()) if (!g.destroyed) g.destroy();
+    mateLanterns.clear();
     mistSprite?.destroy(); // (and out of the scene)
     mistFilter?.destroy();
     delete window.waves;
@@ -2171,5 +2257,6 @@ idleAnglerMods.define({
     { key: 'waves.boats', label: 'Boats sit in the water, partly under the surface (off: on top of it, as the game has them)', toggle: true, fallback: 'on' },
     { key: 'waves.buoys', label: "Hotspot buoys, flying a flag with the spot's bonus in place of its label", toggle: true, fallback: 'on' },
     { key: 'waves.gauges', label: "Lantern gauges: the bite wait and the Frenzy fill two lanterns on the stern, in place of the game's bars", toggle: true, fallback: 'on' },
+    { key: 'waves.lanterns', label: "Lanterns on other players' boats, lit at night as yours is", toggle: true, fallback: 'on' },
   ],
 });
