@@ -4564,6 +4564,7 @@ const stackedNames = async () => {
   // badges (name -> [{ board, rank, icon }], the place in each merged ranking; players who tie share one)
   let order = new Map();
   let ranked = new Map();
+  let ranks = 0; // bumped with each new reading of the boards
   const nameKey = (r) => String(r?.name ?? '').toLowerCase();
   const refresh = async () => {
     const results = await Promise.all(
@@ -4596,6 +4597,7 @@ const stackedNames = async () => {
     });
     for (const list of next.values()) list.sort((x, y) => BOARDS.indexOf(x.board) - BOARDS.indexOf(y.board));
     ranked = next;
+    ranks++;
   };
   refresh().catch(() => {});
   const timer = setInterval(() => refresh().catch(() => {}), REFRESH_MS);
@@ -4680,12 +4682,21 @@ const stackedNames = async () => {
   // Columns that overlap, or touch top to bottom (so a name next to a column joins its even spacing)
   const overlap = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom + GAP && b.top < a.bottom + GAP;
 
+  // Every frame, but the stacking is only worked out again when something it uses has changed: the names
+  // there are, where the game put them (they sit still while the boat is anchored, and ride the swell with
+  // Waves), what they say, the ranks, the badge setting, and every MEASURE_MS for the names' sizes
   let frame = 0;
+  let lastSig = '';
   const tick = () => {
     frame = requestAnimationFrame(tick);
     const now = performance.now();
+    const names = hud.querySelectorAll(':scope > .hud-name');
+    let sig = `${ranks}|${badgeTop}|${Math.floor(now / MEASURE_MS)}`;
+    for (const el of names) sig += `|${el.hidden ? '-' : `${el.style.left},${el.style.top},${el.textContent}`}`;
+    if (sig === lastSig) return;
+    lastSig = sig;
     const items = [];
-    for (const el of hud.querySelectorAll(':scope > .hud-name')) {
+    for (const el of names) {
       if (el.hidden) {
         if (shifted.has(el)) setShift(el, 0);
         continue;
