@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Idle Angler Performance
-// @version      2026-11-25
+// @version      2026-11-26
 // @description  Lower CPU use for computers without graphics acceleration, keeping the look
 // ==/UserScript==
 
@@ -21,6 +21,11 @@
 //  - Lighter blurs. The fog and the lantern's three bloom layers are Pixi blur filters at quality 3 and 4:
 //    each quality step is one more pass across the screen in each direction, 30 passes a frame at
 //    night. Lighter blurs cap them at 2 passes: the same spread, slightly less smooth at the edges.
+//  - Calmer Frenzy label. While you click (or Auto-click does), the game rewrites the Frenzy label under
+//    the bite bar about 57 times a second, and each rewrite makes the browser restyle and lay out the page.
+//    This lets its text change at most 8 times a second, always to the latest; the Frenzy pie and its
+//    colours are untouched. Measured with Auto-click on: 70 to 140 ms a second of the main thread back,
+//    and about a third fewer page changes.
 //  - Meter: a small chip right of the game's "online" player count with the frames a second and the cap
 //    (in the window's bottom left corner until the game shows that count). Click it for the settings
 //    and which renderer the game ended up on: "Microsoft Basic Render Driver" (Windows), "SwiftShader" or
@@ -40,7 +45,7 @@ const perf = async () => {
   const KEY = 'idle-angler-perf';
   const CAPS = [0, 60, 45, 30, 24, 20]; // 0: no cap
   const BLUR_PASSES = 2;
-  const DEFAULTS = { cap: 30, blur: true, meter: true };
+  const DEFAULTS = { cap: 30, blur: true, frenzy: true, meter: true };
   const opts = (() => {
     try {
       return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
@@ -110,6 +115,60 @@ const perf = async () => {
     blurQuality.clear();
   };
 
+  // ---------- Calmer Frenzy label ----------
+  // While you click (or Auto-click does), the game rewrites the Frenzy label under the bite bar on nearly
+  // every frame, since its luck figure has two decimals. Each rewrite makes the browser restyle and lay
+  // out the page again. This holds that one element's text to FRENZY_MS between writes and always
+  // shows the latest. The game's code runs as it is, so the Frenzy pie and its colours still change every
+  // frame, and the switch to or from "Keep clicking to build Frenzy" shows at once.
+  const FRENZY_MS = 125;
+  const textProp = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+  let frenzyEl = null;
+  let frenzyTimer = 0;
+  const calmFrenzy = () => {
+    const el = document.querySelector('.hud-frenzy-text');
+    if (!el || el === frenzyEl) return;
+    unCalmFrenzy();
+    frenzyEl = el;
+    let last = 0;
+    let pending = null;
+    const write = () => {
+      frenzyTimer = 0;
+      last = performance.now();
+      if (pending !== null) textProp.set.call(el, pending);
+      pending = null;
+    };
+    Object.defineProperty(el, 'textContent', {
+      configurable: true,
+      get() {
+        return pending ?? textProp.get.call(this);
+      },
+      set(v) {
+        const text = String(v);
+        const shown = textProp.get.call(this);
+        if (!opts.frenzy || shown.startsWith('Frenzy') !== text.startsWith('Frenzy')) {
+          clearTimeout(frenzyTimer);
+          pending = text;
+          return write();
+        }
+        pending = text === shown ? null : text;
+        if (pending === null || frenzyTimer) return;
+        const wait = last + FRENZY_MS - performance.now();
+        if (wait <= 0) write();
+        else frenzyTimer = setTimeout(write, wait);
+      },
+    });
+  };
+  function unCalmFrenzy() {
+    if (!frenzyEl) return;
+    clearTimeout(frenzyTimer);
+    frenzyTimer = 0;
+    const text = frenzyEl.textContent; // the latest, written or not
+    delete frenzyEl.textContent;
+    frenzyEl.textContent = text;
+    frenzyEl = null;
+  }
+
   // ---------- Renderer ----------
   const rendererName = () => {
     const r = app?.renderer;
@@ -152,6 +211,7 @@ const perf = async () => {
       <h4>Performance</h4>
       <label>Frame cap <select data-k="cap">${CAPS.map((c) => `<option value="${c}">${c ? `${c} a second` : 'Off'}</option>`).join('')}</select></label>
       <label><input type="checkbox" data-k="blur"> Lighter blurs (fog and lantern glow)</label>
+      <label><input type="checkbox" data-k="frenzy"> Calmer Frenzy label (8 updates a second)</label>
       <label><input type="checkbox" data-k="meter"> Show the meter</label>
       <div class="note" data-renderer></div>
       <div class="note">To see the CPU it saves: Chrome's Task Manager (Shift+Esc), the GPU Process and this tab.</div>
@@ -162,6 +222,7 @@ const perf = async () => {
   const capSel = box.querySelector('[data-k="cap"]');
   capSel.value = String(CAPS.includes(opts.cap) ? opts.cap : 30);
   box.querySelector('[data-k="blur"]').checked = opts.blur;
+  box.querySelector('[data-k="frenzy"]').checked = opts.frenzy;
   box.querySelector('[data-k="meter"]').checked = opts.meter;
   box.addEventListener('change', (e) => {
     const k = e.target.dataset.k;
@@ -227,6 +288,7 @@ const perf = async () => {
     }
     watchOnline();
     place();
+    calmFrenzy();
   };
   const meterTimer = setInterval(render, 1000);
   render();
@@ -247,6 +309,7 @@ const perf = async () => {
     removeEventListener('resize', place);
     delete document.getElementById('online-count')?.dataset.iapWatched;
     restoreBlur();
+    unCalmFrenzy();
     box.remove();
     css.remove();
     delete window.idleAnglerPerf;
@@ -258,7 +321,7 @@ idleAnglerMods.define({
   id: 'perf',
   order: 220,
   name: 'Performance',
-  desc: 'Less CPU for computers without graphics acceleration: a frame cap (30 a second unless you pick another), lighter blurs, and a frames-a-second meter by the online count. Click the meter for its settings',
+  desc: 'Less CPU for computers without graphics acceleration: a frame cap (30 a second unless you pick another), lighter blurs, a calmer Frenzy label while clicking, and a frames-a-second meter by the online count. Click the meter for its settings',
   start: perf,
   stop: 'stopIdleAnglerPerf',
 });

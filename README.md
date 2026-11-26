@@ -135,6 +135,8 @@ For computers with no graphics acceleration, where the browser draws the game on
 - **Frame cap** (30 by default): the game's clock runs on elapsed time, so fishing, sailing and timers
   keep their speed.
 - **Lighter blurs** for the fog and the lantern bloom: the same spread in fewer passes.
+- **Calmer Frenzy label:** while you click (or Auto-click does), the Frenzy label's text changes at most 8
+  times a second instead of on nearly every frame, which spares the browser a page layout each time.
 - **Meter:** a chip by the online player count shows frames a second; click it for the settings and the
   renderer the game ended up on.
 
