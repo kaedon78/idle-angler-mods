@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Idle Angler Weather Forecast
-// @version      2026-11-27.2
+// @version      2026-11-27.6
 // @description  The weather hour by hour, day by day and by month: click the time and weather in the top bar, or press W
 // ==/UserScript==
 
@@ -213,13 +213,21 @@ const weatherForecast = async () => {
 :is(#wf-win,#qs-weather) .wf-ic.sm{width:14px;height:13px;display:inline-block;vertical-align:-2px}
 :is(#wf-win,#qs-weather) .wf-muted{color:var(--muted)}
 :is(#wf-win,#qs-weather) .wf-small{font-size:12px}
-:is(#wf-win,#qs-weather) .wf-now{display:grid;grid-template-columns:auto 1fr auto;gap:4px 14px;align-items:center;padding:10px 12px;margin-bottom:10px;
+/* The now box: the weather and what comes after it on one row, the time of day and the next one on the row below,
+   then the effects of the time of day and the weather on one line across the whole box, cut short with … when
+   it doesn't fit (hover it for both in full). Clear has none to show, so it's left out unless someone set it */
+:is(#wf-win,#qs-weather) .wf-now{display:grid;grid-template-columns:auto minmax(min-content,1fr) auto;gap:2px 12px;align-items:center;padding:8px 12px;margin-bottom:10px;
   background:linear-gradient(90deg,color-mix(in srgb,var(--wc) 16%,transparent),rgba(0,0,0,.22));box-shadow:inset 3px 0 0 var(--wc)}
-:is(#wf-win,#qs-weather) .wf-now .wf-ic{grid-row:span 2}
+:is(#wf-win,#qs-weather) .wf-now > .wf-ic{grid-row:span 2}
 :is(#wf-win,#qs-weather) .wf-now .wf-name{font:400 24px/1.1 var(--title);color:var(--wc)}
 :is(#wf-win,#qs-weather) .wf-now .wf-clock{font:600 15px var(--num);text-shadow:1px 1px 0 #000}
-:is(#wf-win,#qs-weather) .wf-now .wf-side{grid-row:span 2;display:grid;gap:3px;justify-items:end;text-align:right;font-size:12px}
-:is(#wf-win,#qs-weather) .wf-now .wf-desc{grid-column:2;font-size:12px}
+:is(#wf-win,#qs-weather) .wf-now .wf-side{display:grid;justify-items:end;text-align:right;font-size:12px;line-height:1.3}
+:is(#wf-win,#qs-weather) .wf-now .wf-when{white-space:nowrap}
+/* At the top of Quicklinks the panel's ✕ sits over the box's top-right corner: the right-hand column keeps clear
+   of it, all of it, so its lines still end in line */
+#qs-weather .wf-now .wf-side{padding-right:24px}
+:is(#wf-win,#qs-weather) .wf-now .wf-fx{grid-column:1 / -1;margin-top:4px;padding-top:5px;border-top:1px solid rgba(255,255,255,.08);
+  font-size:12px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;contain:inline-size}
 /* The tab row is the game's own (.win-tabs.panel-tabs, first in the body: the close button sits at its right end).
    Its sides are pulled out by the body's 6px padding, not the 8px of .panel-tabs' margin, which ran 2px past
    the body and gave it a sideways scrollbar */
@@ -429,18 +437,20 @@ const weatherForecast = async () => {
     const dayStart = nowS - (nowS % DAY);
     const phaseEnd = dayStart + phase.end * DAY;
     const nextPhase = PHASES[(PHASES.indexOf(phase) + 1) % PHASES.length];
+    const set = cur.forced ? `set for everyone${cur.by ? ` by ${cur.by}` : ''}` : '';
+    // [name, effect, html] for the time of day and the weather: the line under the box, and its tooltip
+    const fx = [[phase.name, phase.desc, esc(phase.desc)]];
+    if (cur.w.id !== 'clear' || set) {
+      fx.push([cur.w.name, `${cur.w.desc}${set ? ` (${set})` : ''}`, `${esc(cur.w.desc)}${set ? ` <span class="wf-muted">(${esc(set)})</span>` : ''}`]);
+    }
     return `<div class="wf-now" style="--wc:${color(cur.w)}">
       ${icon(cur.w, phase.id, 'big')}
-      <div><span class="wf-name">${esc(cur.w.name)}</span></div>
-      <div class="wf-side">
-        ${next ? `<span>Then ${icon(next.w, next.phase.id, 'sm')} <b style="color:${color(next.w)}">${esc(next.w.name)}</b> at ${gameTime(next.start)}</span>
-        <span class="wf-muted">in ${dur(next.start - nowS, true)} · ${wall(next.start)}</span>` : ''}
-        <span>${icon(WEATHER_BY_ID.clear, nextPhase.id, 'sm')} ${esc(nextPhase.name)} at ${gameTime(phaseEnd)} <span class="wf-muted">in ${dur(phaseEnd - nowS, true)}</span></span>
-      </div>
-      <div class="wf-desc">
-        <span class="wf-clock">${gameTime(nowS)}</span> · ${esc(phase.name)} <span class="wf-muted">(${esc(phase.desc)})</span><br>
-        ${esc(cur.w.desc)}${cur.forced ? ` <span class="wf-muted">· set for everyone${cur.by ? ` by ${esc(cur.by)}` : ''}</span>` : ''}
-      </div>
+      <span class="wf-name">${esc(cur.w.name)}</span>
+      <span class="wf-side">${next ? `<span>Then ${icon(next.w, next.phase.id, 'sm')} <b style="color:${color(next.w)}">${esc(next.w.name)}</b> at ${gameTime(next.start)}</span>
+        <span class="wf-muted">in ${dur(next.start - nowS, true)} · ${wall(next.start)}</span>` : ''}</span>
+      <span class="wf-when"><span class="wf-clock">${gameTime(nowS)}</span> · ${esc(phase.name)}</span>
+      <span class="wf-side"><span>${icon(WEATHER_BY_ID.clear, nextPhase.id, 'sm')} ${esc(nextPhase.name)} at ${gameTime(phaseEnd)} <span class="wf-muted">in ${dur(phaseEnd - nowS, true)}</span></span></span>
+      <div class="wf-fx" title="${esc(fx.map(([name, desc]) => `${name}: ${desc}`).join('\n'))}">${fx.map(([, , html]) => html).join(' <span class="wf-muted">·</span> ')}</div>
     </div>`;
   }
 
