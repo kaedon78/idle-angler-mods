@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Weather Forecast
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25
+// @version      2026-11-27.2
 // @description  The weather hour by hour, day by day and by month: click the time and weather in the top bar, or press W
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -18,7 +18,9 @@
 // game time:
 //  - Hourly: the next 48 in-game hours (80 real minutes), hour by hour
 //  - 10 Day: the next 10 in-game days (about 6½ real hours)
-//  - Monthly: a calendar of in-game days (about 20 real hours a month); ‹ › change the month
+//  - Monthly: a calendar of in-game days (about 20 real hours a month); ‹ › change the month. Under each
+//    day, the real day and time (this device's clock) its rarest weather starts; hover for every run of it.
+//    Today's cell is dulled like a past day's once its weather is over, its outline kept
 // 10 Day and Monthly show only the rarest weather of each day.
 // The game has no calendar, so the script makes one up: in-game day N (since the clock's start, each
 // day running dawn to dawn, 05:00 to 05:00) gets the weekday and date of real day N. It's only there
@@ -579,6 +581,15 @@ const weatherForecast = async () => {
   const icon = (w, phaseId, cls = '') => `<img class="wf-ic ${cls}" src="${iconSrc(w, phaseId)}" alt="">`;
   const gameTime = (t) => formatHour((5 + ((((t % DAY) + DAY) % DAY) / DAY) * 24) % 24);
   const wall = (t) => new Date(t - offset()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  // The real day and time at server time t, on this device's clock: the weekday while it's within a few days of
+  // now, else the date. Short (for a calendar cell) keeps the time's AM/PM with the time when the line wraps.
+  const realDay = (t, short = false) => {
+    const at = new Date(t - offset());
+    const near = Math.abs(at - Date.now()) < 6 * 86_400_000;
+    const day = at.toLocaleDateString([], near ? { weekday: 'short' } : { month: 'short', day: 'numeric' });
+    const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `${day} ${short ? time.replace(/\s/g, ' ') : time}`;
+  };
   const pad = (n) => String(n).padStart(2, '0');
   const dur = (ms, seconds = false) => {
     const s = Math.max(0, Math.round(ms / 1000));
@@ -665,8 +676,13 @@ const weatherForecast = async () => {
   background:linear-gradient(color-mix(in srgb,var(--wc) 14%,transparent),rgba(0,0,0,.25));box-shadow:inset 0 0 0 1px rgba(0,0,0,.45)}
 #wf-win .wf-day .num{position:absolute;left:4px;top:2px;font:600 12px var(--num);text-shadow:1px 1px 0 #000}
 #wf-win .wf-day .nm{max-width:100%;font-size:11px;line-height:1.1;color:var(--wc);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#wf-win .wf-day .rt{max-width:100%;font-size:10px;line-height:1.15;color:#e5e7eb;text-align:center;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 #wf-win .wf-day.past{opacity:.45}
 #wf-win .wf-day.today{box-shadow:inset 0 0 0 2px var(--accent)}
+/* Today, once its weather is over: dulled as a past day, but its outline kept at full strength (so the
+   contents and the background fade, not the cell, which would fade the outline too) */
+#wf-win .wf-day.today.done > *{opacity:.45}
+#wf-win .wf-day.today.done{background:linear-gradient(color-mix(in srgb,var(--wc) 6%,transparent),rgba(0,0,0,.11))}
 #wf-win .wf-day.blank{background:none;box-shadow:none}
 #wf-win .wf-key{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:10px;font-size:12px}
 #wf-win .wf-key span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
@@ -924,9 +940,12 @@ const weatherForecast = async () => {
       const n = nFirst + i;
       const d = dayInfo(n, nowS);
       const r = d.run;
-      const tip = `${shortDate(n)}: ${d.w.name}${d.allDay ? ', all day' : `, ${gameTime(r.start)}–${gameTime(r.end)}`}${d.runs.length > 1 ? ` (+${d.runs.length - 1} more)` : ''}\n${d.w.desc}\n${r.end <= nowS ? `ended ${dur(nowS - r.end)} ago` : r.start <= nowS ? 'now' : `${rel(r.start, nowS)} (${new Date(r.start - offset()).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })})`}`;
-      cells += `<div class="wf-day ${n < n0 ? 'past' : ''} ${n === n0 ? 'today' : ''}" style="--wc:${color(d.w)}" title="${esc(tip)}">
-        <span class="num">${i + 1}</span>${icon(d.w, 'day')}<span class="nm">${esc(d.w.name)}</span></div>`;
+      // Every run of the day's weather, with the real day and time it starts and ends
+      const runs = d.runs.map((s) => `${d.allDay ? 'All day' : `${gameTime(s.start)}–${gameTime(s.end)}`}: ${realDay(s.start)} to ${wall(s.end)}${s === r && d.runs.length > 1 ? ' ←' : ''}`).join('\n');
+      const tip = `${shortDate(n)}: ${d.w.name}\n${d.w.desc}\n${runs}\n${r.end <= nowS ? `ended ${dur(nowS - r.end)} ago` : r.start <= nowS ? `now, for ${dur(r.end - nowS)}` : rel(r.start, nowS)}`;
+      cells += `<div class="wf-day ${n < n0 ? 'past' : ''} ${n === n0 ? `today${r.end <= nowS ? ' done' : ''}` : ''}" style="--wc:${color(d.w)}" title="${esc(tip)}">
+        <span class="num">${i + 1}</span>${icon(d.w, 'day')}<span class="nm">${esc(d.w.name)}</span>
+        <span class="rt">${esc(realDay(r.start, true))}${d.runs.length > 1 ? `<span class="wf-muted"> +${d.runs.length - 1}</span>` : ''}</span></div>`;
     }
     const key = RARITY.filter((w) => dayShare[w.id] > 0)
       .map((w) => `<span style="--wc:${color(w)}">${icon(w, 'day', 'sm')}<b>${esc(w.name)}</b><span class="wf-muted">${oneIn(dayShare[w.id])}</span></span>`)
@@ -941,7 +960,7 @@ const weatherForecast = async () => {
       </div>
       <div class="wf-cal">${cells}</div>
       <div class="wf-key"><span class="wf-muted">Rarest weather of the day, rarest first:</span>${key}</div>
-      <p class="wf-note">An in-game month is ${days} days, about ${Math.round((days * DAY) / 3_600_000)} real hours; this one ${realStart.getTime() > Date.now() ? 'starts' : 'started'} ${realStart.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}. Hover a day for its times.</p>`;
+      <p class="wf-note">An in-game month is ${days} days, about ${Math.round((days * DAY) / 3_600_000)} real hours; this one ${realStart.getTime() > Date.now() ? 'starts' : 'started'} ${realStart.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}. Under each day: the real day and time its weather starts, on this device's clock (+1 when it comes more than once); hover a day for every time.</p>`;
   }
 
   const TABS = [
