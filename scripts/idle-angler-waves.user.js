@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Waves
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-26.3
+// @version      2026-11-27
 // @description  Rolling waves on the water: none inland, building from the Coast to the Open Ocean, calming to still water in the Cosmic Void; boats sit in the water
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -500,7 +500,7 @@ const waves = async () => {
   const { SEA } = await mod('/src/data.js');
   const { SCENE } = await mod('/src/art.js');
   const { PHASES, WEATHERS, WEATHER_BY_ID } = await mod('/src/world.js');
-  const { Filter, GlProgram, BufferImageSource, RenderTexture, Matrix, Graphics, Sprite, Texture, Container, BlurFilter } = await mod('/vendor/pixi.mjs'); // the page's import map: 'pixi.js'
+  const { Filter, GlProgram, BufferImageSource, RenderTexture, Matrix, Graphics, Sprite, Texture, Container, BlurFilter, Mesh, MeshGeometry, Shader, UniformGroup } = await mod('/vendor/pixi.mjs'); // the page's import map: 'pixi.js'
 
   window.stopWaves?.(); // replace one already running
 
@@ -1216,6 +1216,7 @@ void main(void) {
   const LANTERN_CORE = 0xffd890;
   const STERN = { lanternX: 3, lanternSink: 3, gunwale: 5 }; // scene.js ROWBOAT: the post, from the stern (art px)
   const mateLanterns = new Map(); // a boat's rig (scene.mateRigs' r) -> its lantern (a Graphics in r.rig)
+  const paintedAs = new WeakMap(); // a lantern -> what it was last painted with
   const mateLamps = []; // this frame's glasses, in the scene
   const mateLights = []; // per lantern: its pool and its core, in the light map
   // Paints a boat's lantern where its hull is now (before it pitches) and returns it, with its glass in the rig
@@ -1229,7 +1230,13 @@ void main(void) {
     // (as placeRowboat: the glass 6 px right of the post and 15.5 px above its base, sunk into the hull)
     const at = { x: r.boat.x + (STERN.lanternX + 6) * PX, y: r.boat.y + (STERN.gunwale + STERN.lanternSink - 15.5) * PX };
     g.visible = true;
-    sc.atmo.paintLantern(g.clear(), at, 'post', sc.atmo.lit ?? 0);
+    // Painted again only when it would look different: moved in the rig, lit more or less, or its flame flickering
+    const lit = sc.atmo.lit ?? 0;
+    const key = `${at.x}|${at.y}|${lit > 0.05 ? Math.round(lit * 64) : 0}|${sc.atmo.flicker > 1}`;
+    if (paintedAs.get(g) !== key) {
+      paintedAs.set(g, key);
+      sc.atmo.paintLantern(g.clear(), at, 'post', lit);
+    }
     return { g, at };
   };
   // The lanterns of boats gone from the scene, and the lights left over
@@ -1842,18 +1849,40 @@ void main(void) {
 `;
 
   // A hull (and an oar) in the water: below the surface in its column it sinks into the water's colour and
-  // fades, more the deeper it goes, with a pale line where the surface crosses it
+  // fades, more the deeper it goes, with a pale line where the surface crosses it. Drawn as a mesh in the hull's
+  // place, straight into the scene (a filter on each hull cost an offscreen pass per hull and oar)
+  const HULL_VERTEX = `in vec2 aPosition;
+in vec2 aUV;
+out vec2 vUV;
+out vec4 vColor;
+out vec2 vGlobal;
+uniform mat3 uProjectionMatrix;
+uniform mat3 uWorldTransformMatrix;
+uniform vec4 uWorldColorAlpha;
+uniform vec2 uResolution;
+uniform mat3 uTransformMatrix;
+uniform vec4 uColor;
+uniform float uRound;
+void main(void) {
+  vec3 world = uWorldTransformMatrix * uTransformMatrix * vec3(aPosition, 1.0); // screen px in the scene's picture
+  gl_Position = vec4((uProjectionMatrix * world).xy, 0.0, 1.0);
+  if (uRound == 1.0) gl_Position.xy = (floor((gl_Position.xy * 0.5 + 0.5) * uResolution + 0.5) / uResolution) * 2.0 - 1.0;
+  vGlobal = world.xy;
+  vUV = aUV;
+  vColor = uColor * uWorldColorAlpha;
+}
+`;
   const HULL = `precision highp float;
-in vec2 vTextureCoord;
+in vec2 vUV;
+in vec4 vColor;
+in vec2 vGlobal;
 out vec4 finalColor;
 uniform sampler2D uTexture;
-uniform vec4 uInputSize;
-uniform vec4 uOutputFrame;
 uniform vec3 uWater;
 ${WAVE_GLSL}
 void main(void) {
-  vec4 c = texture(uTexture, vTextureCoord);
-  vec2 g = vTextureCoord * uInputSize.xy + uOutputFrame.xy; // screen px in the scene's picture
+  vec4 c = texture(uTexture, vUV) * vColor;
+  vec2 g = vGlobal;
   float art = PX * uView.y;
   float under = g.y - (uView.w - columnArt(g.x) * art); // screen px below the surface in this column
   if (under >= 0.0 && c.a > 0.0) {
@@ -2014,10 +2043,74 @@ bool onFlag(vec2 p) {
     return f;
   };
 
-  const hullFilter = new Filter({
-    glProgram: GlProgram.from({ vertex: VERTEX, fragment: HULL, name: 'waves-hull' }),
-    resources: { waveHull: { ...waveUniforms(), uWater: { value: new Float32Array([0.12, 0.4, 0.5]), type: 'vec3<f32>' } }, ...surfResources() },
-  });
+  const hullUniforms = new UniformGroup({ ...waveUniforms(), uWater: { value: new Float32Array([0.12, 0.4, 0.5]), type: 'vec3<f32>' } });
+  const hullProgram = GlProgram.from({ vertex: HULL_VERTEX, fragment: HULL, name: 'waves-hull' });
+  // Each hull's mesh: in its parent just before it, drawn in its place while the hull itself isn't (renderable off)
+  const hullMeshes = new Map(); // hull (a Sprite) -> { mesh, geometry, shader, tex }
+  const QUAD = [0, 1, 2, 0, 2, 3];
+  // The hull's picture as Sprite draws it (its frame within the texture, its trim and anchor), in its own space
+  const fitHullMesh = (h, hull) => {
+    const tex = hull.texture;
+    if (h.tex === tex && h.frame === tex.frame.x + tex.frame.y * 1e5 && h.ax === hull.anchor.x && h.ay === hull.anchor.y) return;
+    const { orig, trim, uvs } = tex;
+    const x0 = (trim ? trim.x : 0) - hull.anchor.x * orig.width;
+    const y0 = (trim ? trim.y : 0) - hull.anchor.y * orig.height;
+    const x1 = x0 + (trim ? trim.width : orig.width);
+    const y1 = y0 + (trim ? trim.height : orig.height);
+    h.geometry.positions = new Float32Array([x0, y0, x1, y0, x1, y1, x0, y1]);
+    h.geometry.uvs = new Float32Array([uvs.x0, uvs.y0, uvs.x1, uvs.y1, uvs.x2, uvs.y2, uvs.x3, uvs.y3]);
+    if (h.tex?.source !== tex.source) {
+      h.shader.resources.uTexture = tex.source;
+      h.shader.resources.uTextureSampler = tex.source.style;
+    }
+    h.mesh.texture = tex; // (for its blend mode: premultiplied or not)
+    h.tex = tex;
+    h.frame = tex.frame.x + tex.frame.y * 1e5;
+    h.ax = hull.anchor.x;
+    h.ay = hull.anchor.y;
+  };
+  // Draw this hull (and keep drawing it) through its mesh, laid where the hull is this frame
+  const sinkHull = (hull) => {
+    const parent = hull?.parent;
+    if (!parent || hull.destroyed || !hull.texture) return;
+    let h = hullMeshes.get(hull);
+    if (!h) {
+      const geometry = new MeshGeometry({ positions: new Float32Array(8), uvs: new Float32Array(8), indices: new Uint32Array(QUAD) });
+      const shader = new Shader({ glProgram: hullProgram, resources: { waveHull: hullUniforms, ...surfResources(), uTexture: hull.texture.source, uTextureSampler: hull.texture.source.style } });
+      h = { mesh: new Mesh({ geometry, shader, texture: hull.texture }), geometry, shader, tex: null };
+      h.mesh.label = 'waves-hull';
+      hullMeshes.set(hull, h);
+    }
+    const { mesh } = h;
+    const kids = parent.children;
+    const i = kids.indexOf(hull);
+    if (mesh.parent !== parent || kids[i - 1] !== mesh) parent.addChildAt(mesh, Math.max(0, mesh.parent === parent && kids.indexOf(mesh) < i ? i - 1 : i));
+    fitHullMesh(h, hull);
+    mesh.position.copyFrom(hull.position);
+    mesh.scale.copyFrom(hull.scale);
+    mesh.pivot.copyFrom(hull.pivot);
+    mesh.skew.copyFrom(hull.skew);
+    mesh.rotation = hull.rotation;
+    if (mesh.alpha !== hull.alpha) mesh.alpha = hull.alpha;
+    if (mesh.tint !== hull.tint) mesh.tint = hull.tint;
+    if (mesh.blendMode !== hull.blendMode) mesh.blendMode = hull.blendMode;
+    if (mesh.roundPixels !== hull.roundPixels) mesh.roundPixels = hull.roundPixels;
+    if (mesh.visible !== hull.visible) mesh.visible = hull.visible;
+    if (hull.renderable) hull.renderable = false;
+  };
+  // The hulls as the game draws them again (calm water, the shaders off, or stopped); with `drop`, their meshes go
+  const floatHulls = (drop = false) => {
+    for (const [hull, h] of hullMeshes) {
+      const gone = hull.destroyed || !hull.parent;
+      if (!hull.destroyed && !hull.renderable) hull.renderable = true;
+      if (drop || gone || h.mesh.destroyed) {
+        if (!h.mesh.destroyed) h.mesh.destroy();
+        h.geometry.destroy();
+        h.shader.destroy();
+        hullMeshes.delete(hull);
+      } else if (h.mesh.visible) h.mesh.visible = false;
+    }
+  };
   // The far sea, drawn over the background (sky, painted land) and under everything in front of it: the near water,
   // the Pond's shore, boats. The background's pixels, far sea and all, are left the least bit transparent (alpha
   // 254/255, too little to see: nothing is drawn under the scene), which marks them, so the near water's reflection
@@ -2057,7 +2150,7 @@ void main(void) {
   });
   farFilter.resolution = 'inherit';
   const fu = farFilter.resources.waveFar.uniforms;
-  const hu = hullFilter.resources.waveHull.uniforms;
+  const hu = hullUniforms.uniforms;
   const wu = waterFilter.resources.waveWater.uniforms;
   const ru = reflectFilter.resources.waveReflect.uniforms;
   reflectFilter.apply = function (filterManager, input, output, clearMode) {
@@ -2065,7 +2158,7 @@ void main(void) {
     ru.uDimensions[1] = input.frame.height;
     filterManager.applyFilter(this, input, output, clearMode);
   };
-  for (const f of [waterFilter, reflectFilter, hullFilter]) f.resolution = 'inherit'; // the game's chunky render resolution
+  for (const f of [waterFilter, reflectFilter]) f.resolution = 'inherit'; // the game's chunky render resolution
 
   // ---------- Each frame ----------
   let intensity = 0; // eased toward where you are
@@ -2090,7 +2183,7 @@ void main(void) {
     if (scene?.bgLayer?.filters?.includes(farFilter)) scene.bgLayer.filters = null;
     if (post.mirror?.filters?.[0] === reflectFilter) post.mirror.filters = [post.reflect];
     if (shaftFilter && post.group?.filters?.[0] === shaftFilter) post.group.filters = [post.shafts];
-    if (scene) for (const hull of hulls(scene)) if (hull.filters?.includes(hullFilter)) hull.filters = null;
+    floatHulls();
     if (scene?.spotGlow) scene.spotGlow.renderable = true; // (and the spots' rings: the game draws them afresh each frame)
     spotHaze.visible = false;
     if (scene) drawBuoys(scene, () => 0); // (on the game's flat water)
@@ -2199,7 +2292,6 @@ void main(void) {
     } else if (!scene.waterLayer.filters?.includes(waterFilter)) scene.waterLayer.filters = [waterFilter];
     const tint = scene.zone.water ?? 0x1f78b4;
     hu.uWater.set([((tint >> 16) & 255) / 255, ((tint >> 8) & 255) / 255, (tint & 255) / 255]);
-    if (BOATS) for (const hull of hulls(scene)) if (!hull.filters?.includes(hullFilter)) hull.filters = [hullFilter];
 
     // Your boat (hull, angler, oar) sits SINK art px deep in the water under its hull; the bobber on the water under it
     const moved = [];
@@ -2465,6 +2557,15 @@ void main(void) {
       return Number.isFinite(s) ? s : 0;
     });
     drawLampGlow(scene); // (the buoys' lamps at night)
+    // The hulls in the water, each where it is now (lifted, pitched), through its mesh; and the meshes of boats gone
+    for (const [hull, h] of hullMeshes) {
+      if (!hull.destroyed && hull.parent && !h.mesh.destroyed) continue;
+      if (!h.mesh.destroyed) h.mesh.destroy();
+      h.geometry.destroy();
+      h.shader.destroy();
+      hullMeshes.delete(hull);
+    }
+    if (BOATS) for (const hull of hulls(scene)) sinkHull(hull);
     const KEEP = 'waves-keep-alpha'; // (normal, keeping the alpha; unknown to the game, which reads it as normal)
     const normal = st?.blendModesMap?.normal;
     const laid = [];
@@ -2663,6 +2764,7 @@ void main(void) {
   window.stopWaves = () => {
     if (proto.render === render) proto.render = original;
     if (lastPost) calm(lastPost); // the game's own water and reflection again
+    floatHulls(true);
     unsee();
     panel.remove();
     style.remove();
