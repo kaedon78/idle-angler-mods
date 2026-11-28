@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Mods
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-28
+// @version      2026-11-28.4
 // @description  Idle Angler's UI mods in one script, each switched on or off in the game's Settings > Mods
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -1409,7 +1409,7 @@ const incomePills = async () => {
     // In the Quicklinks panel: the top bar's .currency and .rate rules (ui.css scopes them to #topbar)
     '#qs-pills #measured-rate-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;' +
     'font:600 17px var(--num);font-variant-numeric:lining-nums tabular-nums;text-shadow:1px 1px 0 #000}' +
-    '#qs-pills .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
+    '#qs-pills .rate{padding:1px 8px;font-size:13px;font-weight:500;color:#c6f29a;text-shadow:none;' +
     'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
     '#qs-pills .rate .per{color:#8fbf6c}';
   document.head.append(style);
@@ -3250,11 +3250,12 @@ idleAnglerMods.define({
 //  - Min-maxer: the income pills (that mod puts them here while both run), and under
 //    them the 3 stats a +10% of is worth the most Gold/s (the Min-maxer's Gains tab); Open opens the Min-maxer
 //  - Gear: the 6 pieces of gear you're wearing (click one to take it off, as on the paper doll), then
-//    your saved gear sets; click one to put it on (its number key does too, with the build switcher on),
-//    ⟳ saves what you're wearing over it, ✕ deletes it, and "+ Save what you're wearing" adds a new one
+//    your saved gear sets in one row: pick one in the dropdown to put it on (its number key does too, with
+//    the build switcher on); Save saves what you're wearing over the set it shows, or as a new one ("New
+//    set…"), and Delete deletes it
 //  - Bounties: the three bounty rows, with their progress and Claim (or Reroll) buttons
 //  - Ascend: how many times you've ascended, progress toward the next ascension (or the Oracle's target),
-//    and the Oracle's "ascend for me" as buttons (Off, 1x-10x) beside the Ascend button
+//    and the Oracle's "ascend for me" as buttons (Off, 1x-3x) beside the Ascend button
 //  - Upgrades: the upgrade the Foreman buys next (as the Upgrades window draws it, with its buy button), and what
 //    it's buying (off, save up for the top of the list, or the next one you can afford)
 //  - Chests: how many you have, what opening them all now pays on average, and Open all
@@ -3342,23 +3343,45 @@ const summaryPanel = async () => {
       ${itemArt(item)}<span class="ilvl">${item.ilvl ?? 1}</span></button>`;
   }
   const priorityName = (key) => (key === 'gold' ? 'Income' : STATS[key]?.seekTier ? `${RARITIES[STATS[key].seekTier].name} odds` : STATS[key]?.name ?? key);
+  // One row: a dropdown of your sets (picking one puts it on), then Save and Delete for the set it shows. Its last
+  // choice, while there's room for another set, is a new one: Save then asks its name (the game's own prompt).
+  // The dropdown shows the set you picked, else the one you're wearing, else a new one. A set it shows stays
+  // shown when you change a piece of it, until another set is put on (here, by the build switcher's keys or in
+  // Angler > Character)
+  let setPick = null; // the set index the dropdown shows, 'new', or null: go by what you're wearing
+  let lastWorn = -1; // the set you were wearing when it was last drawn
   function gearSetsHtml() {
     const st = S.state;
     const sets = st.gearSets ?? [];
     const keys = window.buildSwitcherKeys ?? 0; // the build switcher's 1-5, while it runs
-    const cells = sets.map((set, i) => {
+    const room = sets.length < GEAR_SETS.max;
+    const info = sets.map((set) => {
       const pieces = Object.entries(set.items ?? {});
-      const have = pieces.filter(([, uid]) => S.itemByUid(uid)).length;
-      const wearing = pieces.length > 0 && pieces.every(([slot, uid]) => st.equipped[slot] === uid);
-      const key = i < keys ? `<kbd title="Press ${i + 1} to put this set on">${i + 1}</kbd>` : '';
-      return `<div class="gearset">
-        <button class="btn small ${wearing ? 'primary' : ''}" data-action="gearset-equip" data-index="${i}" title="Put this set on${set.priority ? ` (and its build: ${esc(set.priority.length ? set.priority.map(priorityName).join(', ') : 'Income')})` : ''}${key ? ` · or press ${i + 1}` : ''}">${key}${esc(set.name)} <span class="muted">${have}/${pieces.length}</span></button>
-        <button class="btn small icon-btn" data-action="gearset-save" data-index="${i}" title="Save what you're wearing as ${esc(set.name)}">⟳</button>
-        <button class="btn small icon-btn" data-action="gearset-delete" data-index="${i}" title="Delete ${esc(set.name)}">✕</button>
-      </div>`;
+      return {
+        set,
+        have: pieces.filter(([, uid]) => S.itemByUid(uid)).length,
+        total: pieces.length,
+        wearing: pieces.length > 0 && pieces.every(([slot, uid]) => st.equipped[slot] === uid),
+      };
     });
-    if (sets.length < GEAR_SETS.max) cells.push(`<button class="btn small" data-action="gearset-save" data-index="${sets.length}">+ Save what you're wearing</button>`);
-    return `<div class="gearsets">${cells.join('')}</div>`;
+    // The set shown, if you're wearing it (one set's gear can be all of another's too), else the first you are
+    const worn = Number.isInteger(setPick) && info[setPick]?.wearing ? setPick : info.findIndex((s) => s.wearing);
+    if (worn >= 0 && worn !== lastWorn) setPick = worn;
+    lastWorn = worn;
+    let pick = setPick === 'new' && room ? 'new' : Number.isInteger(setPick) && setPick < sets.length ? setPick : null;
+    pick ??= worn >= 0 ? worn : room ? 'new' : 0;
+    const options = info.map(({ set, have, total, wearing }, i) =>
+      `<option value="${i}" ${pick === i ? 'selected' : ''}>${i < keys ? `${i + 1}. ` : ''}${esc(set.name)} (${have}/${total})${wearing ? ' · on' : ''}</option>`);
+    if (room) options.push(`<option value="new" ${pick === 'new' ? 'selected' : ''}>New set…</option>`);
+    const cur = pick === 'new' ? null : info[pick];
+    const build = cur?.set.priority ? ` Its build: ${cur.set.priority.length ? cur.set.priority.map(priorityName).join(', ') : 'Income'}.` : '';
+    const pickTitle = `Pick a gear set to put it on.${build}${keys ? ` Or press 1-${Math.min(keys, sets.length) || 1}.` : ''}`;
+    const index = cur ? pick : sets.length;
+    return `<div class="qs-setrow">
+      <select data-qs-set aria-label="Gear set" title="${esc(pickTitle)}">${options.join('')}</select>
+      <button class="btn small" data-action="gearset-save" data-index="${index}" title="${cur ? `Save what you're wearing as ${esc(cur.set.name)}` : "Save what you're wearing as a new gear set"}">Save</button>
+      <button class="btn small" data-action="gearset-delete" data-index="${index}" ${disabled(!cur)} title="${cur ? `Delete ${esc(cur.set.name)} (its gear stays in your bag)` : 'Pick a set to delete it'}">Delete</button>
+    </div>`;
   }
   const buildsHtml = () => `<div class="qs-slots">${['rod', 'hook', 'reel', 'bait', 'line', 'charm'].map(slotCell).join('')}</div>${gearSetsHtml()}`;
 
@@ -3407,9 +3430,9 @@ const summaryPanel = async () => {
 
   // ---------- Ascend and the Oracle (as the Ascension window draws them) ----------
   // The bar measures toward where the Oracle will ascend for you (its 1×-10×), or the requirement itself
-  // while it's off or not bought. Its choice is a row of buttons, one per multiple the game offers: each
-  // is the game's own auto-ascend control (data-change, the value the dropdown's option has), and a click
-  // on the lit one sends 0, the dropdown's "off" (onOracle, below, hands it to the game's change handler).
+  // while it's off or not bought. Its choice is a row of buttons, Off and the multiples: each is the game's
+  // own auto-ascend control (data-change, the value the dropdown's option has; Off's is 0), which onOracle,
+  // below, hands to the game's change handler.
   function ascendHtml() {
     const st = S.state;
     const req = S.ascensionRequirement();
@@ -3419,8 +3442,9 @@ const summaryPanel = async () => {
     const progress = Math.min(1, st.runGold / target);
     const can = S.canAscend();
     const goal = at ? `${moneyHtml(target)} <span class="muted">for the Oracle at ${at}×</span>` : `${moneyHtml(req)} needed`;
-    // Off, then 1x-10x: the game's dropdown's options (AUTO_ASCEND_AT), the one set lit
-    const choices = AUTO_ASCEND_AT.map((x) => {
+    // Off, then the game's dropdown's multiples (AUTO_ASCEND_AT) up to 3x, the one set lit. 5x and 10x are left
+    // out, unless one is set (in the Ascension window), so what the Oracle does is still shown (lit) here
+    const choices = AUTO_ASCEND_AT.filter((x) => x <= 3 || x === st.settings.autoAscendAt).map((x) => {
       const on = (st.settings.autoAscendAt ?? 0) === x;
       const title = x ? `Ascend for me at ${x}× the requirement (${money(req * x)})` : "Don't ascend for me";
       return `<button type="button" class="btn small ${on ? 'primary' : ''}" data-change="auto-ascend" value="${x}" aria-pressed="${on}" title="${title}">${x ? `${x}x` : 'Off'}</button>`;
@@ -3568,10 +3592,13 @@ const summaryPanel = async () => {
     const total = owned.reduce((n, c) => n + c.count, 0);
     const byTier = new Map();
     for (const c of owned) byTier.set(c.tier, (byTier.get(c.tier) ?? 0) + c.count);
-    const kinds = [...byTier]
-      .sort((a, b) => b[0] - a[0])
-      .map(([tier, n]) => `<span style="color:${tierColor(tier)}">${fmtHtml(n)} ${esc(tierName(tier))}</span>`)
-      .join(' · ');
+    // The 5 best rarities you have, best first, then how many chests the rest come to
+    const tiers = [...byTier].sort((a, b) => b[0] - a[0]);
+    const rest = tiers.slice(5).reduce((n, [, count]) => n + count, 0);
+    const kinds = tiers
+      .slice(0, 5)
+      .map(([tier, n]) => `<span style="color:${tierColor(tier)}">${fmtHtml(n)}&nbsp;${esc(tierName(tier))}</span>`)
+      .join(' · ') + (rest ? ` <span class="muted">and&nbsp;${fmtHtml(rest)}&nbsp;more</span>` : '');
     const best = owned.length ? Math.max(...owned.map((c) => c.tier)) : 0;
     let worth = '';
     if (total) {
@@ -3581,11 +3608,11 @@ const summaryPanel = async () => {
         + (sold ? ', which the Pawnbroker sells at once.' : ', which goes to your bag to sell.')
         + ` About ${fmt(Math.round(gear))} pieces of gear come out too (not counted).`
         + ' Chests are priced when you open them, with your gear, weather and time of day then, so this moves with them.';
-      worth = `<div class="sub" title="${esc(title)}">Worth about <b>${moneyHtml(coin + treasure)}</b>${sold ? '' : ' with treasure sold'}</div>`;
+      worth = `<span class="sub qs-worth" title="${esc(title)}">Worth about <b>${moneyHtml(coin + treasure)}</b></span>`;
     }
     return `<div class="qs-chests">
         ${chestIcon(best)}
-        <div class="row-main"><div class="name">${total ? `${fmtHtml(total)} chest${total === 1 ? '' : 's'}` : 'No chests'}</div>${kinds ? `<div class="sub">${kinds}</div>` : ''}${worth}</div>
+        <div class="row-main"><div class="name">${total ? `${fmtHtml(total)} chest${total === 1 ? '' : 's'}` : 'No chests'}${worth}</div>${kinds ? `<div class="sub">${kinds}</div>` : ''}</div>
         <button class="btn primary" data-action="open-every-chest" ${disabled(!total)}>Open all</button>
       </div>`;
   }
@@ -3834,8 +3861,9 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
 #summary-panel .qs-asc-count{margin:2px 0 4px}
 #summary-panel .qs-slots{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}
 #summary-panel .qs-slots .gear-slot{flex:none}
-#summary-panel .gearsets{justify-content:start;margin:4px 0}
-#summary-panel .gearset .btn kbd{margin-right:6px}
+#summary-panel .qs-setrow{display:flex;align-items:center;gap:6px;margin:4px 0}
+#summary-panel .qs-setrow select{flex:1 1 auto;min-width:0}
+#summary-panel .qs-setrow .btn{flex:none}
 #summary-panel .btn.wide{width:100%}
 #summary-panel .setting-select{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:6px 0 0}
 #summary-panel .setting-select select{flex:1 1 140px;min-width:0}
@@ -3868,6 +3896,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
 #summary-panel p{margin:4px 0}
 #summary-panel .qs-chests{display:flex;align-items:center;gap:8px}
 #summary-panel .qs-chests .row-main{flex:1}
+#summary-panel .qs-chests .qs-worth{margin-left:10px;font-weight:400}
 #summary-panel .bag-grid{justify-content:start;margin:6px 0}
 #summary-panel .qs-next-up{margin:4px 0 0}
 #qs-pills:has(#measured-rate-wrap) .qs-pills-off{display:none}
@@ -3962,7 +3991,7 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     setTimeout(render, 0);
   };
   panel.addEventListener('click', onFold);
-  // The Oracle's 1x-10x buttons: a click hands the button (its data-change and value, as the dropdown's
+  // The Oracle's 1x-3x buttons: a click hands the button (its data-change and value, as the dropdown's
   // option would have them) to the game's own change handler on the window layer
   const onOracle = (e) => {
     const btn = e.target.closest('.qs-oracle [data-change="auto-ascend"]');
@@ -3977,6 +4006,33 @@ body.qs-open #windows #summary-panel.window{transform:none;visibility:visible;tr
     window.gearJudge?.setPick({ [sel.dataset.qsJudge]: sel.value });
   };
   panel.addEventListener('change', onJudgePick);
+  // The gear set dropdown (no data-change either): a set picked is put on, by the game's own gearset-equip
+  // (a click on a button carrying it, as the set's button in Angler > Character would be)
+  const onSetPick = (e) => {
+    const sel = e.target.closest('select[data-qs-set]');
+    if (!sel) return;
+    sel.blur();
+    setPick = sel.value === 'new' ? 'new' : Number(sel.value);
+    if (setPick !== 'new') {
+      const btn = document.createElement('button');
+      btn.hidden = true;
+      btn.dataset.action = 'gearset-equip';
+      btn.dataset.index = String(setPick);
+      sel.after(btn);
+      btn.click();
+      btn.remove();
+    }
+    setTimeout(render, 0);
+  };
+  panel.addEventListener('change', onSetPick);
+  // Save on a new set shows that set once it's saved (if the name is given up, there's none, and the dropdown goes
+  // back to what you're wearing); Delete goes back to what you're wearing, whether or not it's confirmed
+  const onSetButton = (e) => {
+    const btn = e.target.closest('.qs-setrow [data-action="gearset-save"], .qs-setrow [data-action="gearset-delete"]');
+    if (!btn) return; // not the dropdown's own gearset-equip, which keeps the set it put on
+    setPick = btn.dataset.action === 'gearset-save' ? Number(btn.dataset.index) : null;
+  };
+  panel.addEventListener('click', onSetButton, true);
 
   // ---------- The Quicklinks sidebar ----------
   // A second sidebar like the game's, down the right edge: the Quicklinks button (it slides the panel out

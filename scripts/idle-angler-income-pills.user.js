@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Income Pills
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-25
+// @version      2026-11-28.1
 // @description  Measured gold, fish, chests and XP a minute
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -540,7 +540,7 @@ const incomePills = async () => {
     // In the Quicklinks panel: the top bar's .currency and .rate rules (ui.css scopes them to #topbar)
     '#qs-pills #measured-rate-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0;' +
     'font:600 17px var(--num);font-variant-numeric:lining-nums tabular-nums;text-shadow:1px 1px 0 #000}' +
-    '#qs-pills .rate{padding:1px 8px;font-size:15px;font-weight:500;color:#c6f29a;text-shadow:none;' +
+    '#qs-pills .rate{padding:1px 8px;font-size:13px;font-weight:500;color:#c6f29a;text-shadow:none;' +
     'background:rgba(10,18,8,.6);border-radius:999px;box-shadow:inset 0 0 0 1px rgba(155,227,106,.4)}' +
     '#qs-pills .rate .per{color:#8fbf6c}';
   document.head.append(style);
