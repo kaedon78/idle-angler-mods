@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Idle Angler Mods
 // @namespace    http://tampermonkey.net/
-// @version      2026-11-27.6
+// @version      2026-11-28
 // @description  Idle Angler's UI mods in one script, each switched on or off in the game's Settings > Mods
 // @match        https://idle-angler.onrender.com/
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=onrender.com
@@ -624,14 +624,16 @@ body.ia-grip-drag,body.ia-grip-drag *{transition:none !important;animation:none 
 // out, these two keep the scene at its full size (so the game never lays it out again), and part of it is
 // under the panel or past the edge of the screen: the middle of the scene isn't the middle of what you see,
 // and the bigger the screen, the further off it is. While either of them is on, both aim for the middle of
-// the part you see instead (the camera easing over as it always does). Where the game's camera doesn't
+// the part you see instead (the camera easing over as it always does). The arrows at the screen's edges that
+// point to fishing spots and the Golden Fish off screen (scene.js drawEdgeMarks) go by the part you see too,
+// so a spot under the panel gets an arrow beside the panel. Where the game's camera doesn't
 // follow the boat (moored at the Pond's pier, the cabin framed) it stays put. It only moves what you see:
 // nothing goes to the server.
 // One for the page (kept on window), so two scripts that carry this don't wrap the game's methods twice.
 // =====================================================================================================
 const viewCentre = window.idleAnglerViewCentre ??= (() => {
   const users = new Set();
-  const AIMED = ['followBoat', 'announce']; // the game's methods that aim for the middle of the screen
+  const AIMED = ['followBoat', 'announce', 'drawEdgeMarks']; // the game's methods that go by the screen's width
   let proto = null, originals = null, probe = null, observer = null;
   let share = 0.5; // where the middle of what you see is, as a share of the scene's width (the game's: half)
   let stale = true;
@@ -645,8 +647,9 @@ const viewCentre = window.idleAnglerViewCentre ??= (() => {
     const whole = document.getElementById('game')?.clientWidth || innerWidth;
     share = seen > 0 && whole > 0 ? Math.min(0.5, seen / 2 / whole) : 0.5;
   };
-  // Each of these aims at the middle of the screen as L.SW / 2, and reads L.SW for nothing else: for the one
-  // call, the screen is made twice as wide as the middle of the part you see
+  // The first two aim at the middle of the screen as L.SW / 2, and the arrows take L.SW as the screen's right
+  // edge; none reads L.SW for anything else. For the one call, the screen is made as wide as the part you see
+  // (twice its middle), whose left end is the scene's left edge
   const aimed = (original) => function (...args) {
     if (stale) measure();
     const L = this.L;
